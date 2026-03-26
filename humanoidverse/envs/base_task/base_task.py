@@ -1,4 +1,3 @@
-
 import sys
 import os
 import numpy as np
@@ -131,7 +130,7 @@ class BaseTask():
             self.terrain_types = torch.div(torch.arange(self.num_envs, device=self.device), (self.num_envs/self.config.terrain.num_cols), rounding_mode='floor').to(torch.long)
             self.max_terrain_level = self.config.terrain.num_rows
             if isinstance(self.simulator.terrain.env_origins, np.ndarray):
-                self.terrain_origins = torch.from_numpy(self.simulator.terrain.env_origins).to(self.device).to(torch.float)
+                seinit_statelf.terrain_origins = torch.from_numpy(self.simulator.terrain.env_origins).to(self.device).to(torch.float)
             else:
                 self.terrain_origins = self.simulator.terrain.env_origins.to(self.device).to(torch.float)   
             self.env_origins[:] = self.terrain_origins[self.terrain_levels, self.terrain_types]

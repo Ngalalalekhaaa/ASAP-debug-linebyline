@@ -9,7 +9,7 @@ from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
 from humanoidverse.utils.logging import HydraLoggerBridge
 import logging
-from utils.config_utils import *  # noqa: E402, F403
+#from utils.config_utils import *  # noqa: E402, F403 #和下面重复导入了
 
 # add argparse arguments
 
@@ -50,7 +50,7 @@ def listen_for_keypress(env):
 # from humanoidverse.envs.base_task.base_task import BaseTask
 # from humanoidverse.envs.base_task.omnih2o_cfg import OmniH2OCfg
 
-@hydra.main(config_path="config", config_name="base_eval")
+@hydra.main(config_path="config", config_name="base_eval", version_base="1.2")
 def main(override_config: OmegaConf):
     # logging to hydra log file
     hydra_log_path = os.path.join(HydraConfig.get().runtime.output_dir, "eval.log")
