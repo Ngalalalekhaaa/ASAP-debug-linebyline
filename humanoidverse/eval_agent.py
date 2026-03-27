@@ -64,7 +64,7 @@ def main(override_config: OmegaConf):
     logging.basicConfig(level=logging.DEBUG)
     logging.getLogger().addHandler(HydraLoggerBridge())
 
-    os.chdir(hydra.utils.get_original_cwd())
+    # os.chdir(hydra.utils.get_original_cwd())
 
     if override_config.checkpoint is not None:
         has_config = True

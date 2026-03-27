@@ -2,7 +2,7 @@
 
 defaults:
   - legged_base
-
+#default表示继承
 # Env structure
 env:
   _target_: humanoidverse.envs.motion_tracking.motion_tracking.LeggedRobotMotionTracking

@@ -4,6 +4,7 @@ from loguru import logger
 # from isaacgym import gymtorch, gymapi, gymutil
 import torch
 import genesis as gs
+gs.init(backend=gs.gpu)
 from genesis.engine.solvers.rigid.rigid_solver_decomp import RigidSolver
 from humanoidverse.simulator.genesis.tmp_gs_utils import *
 from humanoidverse.simulator.genesis.genesis_viewer import Viewer
@@ -33,7 +34,9 @@ class Genesis(BaseSimulator):
         self.device = device
         self.sim_device = device
         self.headless = False
-        gs.init(backend=gs.gpu if 'cuda' in self.device else gs.cpu)
+        # gs.init(backend=gs.gpu if 'cuda' in self.device else gs.cpu)
+        # from genesis.engine.solvers.rigid.rigid_solver_decomp import RigidSolver
+
 
     # ----- Configuration Setup Methods -----
 

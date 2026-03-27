@@ -70,7 +70,7 @@ def main(config: OmegaConf):
     logging.getLogger().addHandler(HydraLoggerBridge())
 
     unresolved_conf = OmegaConf.to_container(config, resolve=False)
-    os.chdir(hydra.utils.get_original_cwd())
+    #os.chdir(hydra.utils.get_original_cwd())
 
     if config.use_wandb:
         project_name = f"{config.project_name}"
