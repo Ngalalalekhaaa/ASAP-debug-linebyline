@@ -229,124 +229,175 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
 
 
     def _pre_compute_observations_callback(self):
-        super()._pre_compute_observations_callback()
+            # 调用父类的同名方法，确保基础的观测预计算（如基础刚体状态更新）被执行
+            super()._pre_compute_observations_callback()
+            
+            # ---------------------------------------------------------
+            # 1. 获取参考动作（Reference Motion/Kinematics）
+            # ---------------------------------------------------------
+            # 环境的原点偏移量（在并行仿真中，通常有成千上万个机器人平铺在地面上，每个环境有自己的原点偏移）
+            offset = self.env_origins
+            # B 是 Batch Size，也就是并行环境的数量 (num_envs)
+            B = self.motion_ids.shape[0]
+            
+            # 计算当前需要查询的“参考动作时间”。
+            # episode_length_buf 记录了当前回合进行了多少步。+1 是为了预测“下一步”的目标，引导策略。
+            # dt 是物理步长，motion_start_times 是当前动作片段的起始时间。
+            motion_times = (self.episode_length_buf + 1) * self.dt + self.motion_start_times # next frames so +1
+            
+            # 根据当前时间，从动作捕捉库（motion_lib）中查询此时机器人所有刚体和关节应该处于的状态
+            motion_res = self._motion_lib.get_motion_state(self.motion_ids, motion_times, offset=offset)
+
+            # 提取参考状态（带有 _extend 后缀说明包含了附加的追踪标记点 Marker）
+            ref_body_pos_extend = motion_res["rg_pos_t"]            # 参考刚体位置
+            self.ref_body_pos_extend[:] = ref_body_pos_extend       # 存入类属性，常用于图形化渲染(visualization)或数据分析
+            ref_body_vel_extend = motion_res["body_vel_t"]          # 参考刚体线速度 [环境数, 标记点数, 3]
+            self.ref_body_rot_extend = ref_body_rot_extend = motion_res["rg_rot_t"] # 参考刚体旋转(四元数) [环境数, 标记点数, 4]
+            ref_body_ang_vel_extend = motion_res["body_ang_vel_t"]  # 参考刚体角速度 [环境数, 标记点数, 3]
+            ref_joint_pos = motion_res["dof_pos"]                   # 参考关节角度(自由度位置) [环境数, 自由度数]
+            ref_joint_vel = motion_res["dof_vel"]                   # 参考关节角速度 [环境数, 自由度数]
+
+
+            # ---------------------------------------------------------
+            # 2. 计算扩展刚体（虚拟追踪点）在世界坐标系下的真实状态 (Forward Kinematics)
+            # 强化学习中，有时在连杆表面贴上虚拟标记点能更好地引导模仿动作。
+            # ---------------------------------------------------------
+            ################### EXTEND Rigid body POS (扩展刚体位置) #####################
+            # self.extend_body_pos_in_parent 是虚拟点在父连杆局部坐标系下的位置偏移。
+            # 这里使用四元数旋转矩阵，将这个局部偏移量，根据父连杆当前的真实旋转角度，转换到世界方向上。
+            rotated_pos_in_parent = my_quat_rotate(
+                self.simulator._rigid_body_rot[:, self.extend_body_parent_ids].reshape(-1, 4),
+                self.extend_body_pos_in_parent.reshape(-1, 3)
+            )
+            # 将偏移量叠加到父连杆的世界坐标位置上，得到虚拟点真实的世界坐标位置。
+            extend_curr_pos = my_quat_rotate(
+                self.extend_body_rot_in_parent_xyzw.reshape(-1, 4),
+                rotated_pos_in_parent
+            ).view(self.num_envs, -1, 3) + self.simulator._rigid_body_pos[:, self.extend_body_parent_ids]
+            
+            # 将原生刚体位置和虚拟点位置拼接在一起，方便后续统一计算
+            self._rigid_body_pos_extend = torch.cat([self.simulator._rigid_body_pos, extend_curr_pos], dim=1)
+
+            ################### EXTEND Rigid body Rotation (扩展刚体旋转) #####################
+            # 四元数乘法 (quat_mul)：父连杆的旋转 × 虚拟点在父连杆上的相对旋转 = 虚拟点在世界坐标系下的绝对旋转
+            extend_curr_rot = quat_mul(self.simulator._rigid_body_rot[:, self.extend_body_parent_ids].reshape(-1, 4),
+                                        self.extend_body_rot_in_parent_xyzw.reshape(-1, 4),
+                                        w_last=True).view(self.num_envs, -1, 4)
+            self._rigid_body_rot_extend = torch.cat([self.simulator._rigid_body_rot, extend_curr_rot], dim=1)
+            
+            ################### EXTEND Rigid Body Angular Velocity (扩展刚体角速度) #####################
+            # 虚拟点固连在父连杆上，因此它的角速度直接等于父连杆的角速度
+            self._rigid_body_ang_vel_extend = torch.cat([self.simulator._rigid_body_ang_vel, self.simulator._rigid_body_ang_vel[:, self.extend_body_parent_ids]], dim=1)
         
-        offset = self.env_origins
-        B = self.motion_ids.shape[0]
-        motion_times = (self.episode_length_buf + 1) * self.dt + self.motion_start_times # next frames so +1
-        # motion_res = self._get_state_from_motionlib_cache_trimesh(self.motion_ids, motion_times, offset= offset)
-        motion_res = self._motion_lib.get_motion_state(self.motion_ids, motion_times, offset=offset)
+            ################### EXTEND Rigid Body Linear Velocity (扩展刚体线速度) #####################
+            # 运动学公式：v_点 = v_父 + (角速度 × 相对位置矢量) -> 也就是因为旋转产生的额外线速度
+            self._rigid_body_ang_vel_global = self.simulator._rigid_body_ang_vel[:, self.extend_body_parent_ids]
+            # 叉乘求出因为连杆旋转给边缘虚拟点带来的线速度贡献
+            angular_velocity_contribution = torch.cross(self._rigid_body_ang_vel_global, self.extend_body_pos_in_parent.view(self.num_envs, -1, 3), dim=2)
+            # 最终线速度 = 父连杆中心线速度 + 旋转贡献线速度
+            extend_curr_vel = self.simulator._rigid_body_vel[:, self.extend_body_parent_ids] + angular_velocity_contribution.view(self.num_envs, -1, 3)
+            self._rigid_body_vel_extend = torch.cat([self.simulator._rigid_body_vel, extend_curr_vel], dim=1)
 
-        ref_body_pos_extend = motion_res["rg_pos_t"]
-        self.ref_body_pos_extend[:] = ref_body_pos_extend # for visualization and analysis
-        ref_body_vel_extend = motion_res["body_vel_t"] # [num_envs, num_markers, 3]
-        self.ref_body_rot_extend = ref_body_rot_extend = motion_res["rg_rot_t"] # [num_envs, num_markers, 4]
-        ref_body_ang_vel_extend = motion_res["body_ang_vel_t"] # [num_envs, num_markers, 3]
-        ref_joint_pos = motion_res["dof_pos"] # [num_envs, num_dofs]
-        ref_joint_vel = motion_res["dof_vel"] # [num_envs, num_dofs]
+            # ---------------------------------------------------------
+            # 3. 计算 Tracking Errors (实际状态与参考动作的差异，用于算 Reward)
+            # ---------------------------------------------------------
+            ################### Compute differences #####################
 
+            ## diff compute - kinematic position (位置差异 = 参考位置 - 实际位置)
+            self.dif_global_body_pos = ref_body_pos_extend - self._rigid_body_pos_extend
+            
+            ## diff compute - kinematic rotation (旋转差异 = 参考四元数 × 实际四元数的共轭)
+            # 在四元数数学中，求两个姿态的差异（误差角），相当于乘上另一个的逆（共轭）
+            self.dif_global_body_rot = quat_mul(ref_body_rot_extend, quat_conjugate(self._rigid_body_rot_extend, w_last=True), w_last=True)
+            
+            ## diff compute - kinematic velocity (线速度差异)
+            self.dif_global_body_vel = ref_body_vel_extend - self._rigid_body_vel_extend
+            
+            ## diff compute - kinematic angular velocity (角速度差异)
+            self.dif_global_body_ang_vel = ref_body_ang_vel_extend - self._rigid_body_ang_vel_extend
+            
+            ## diff compute - kinematic joint position (关节角度差异，用于底层 PD 控制或直接给策略参考)
+            self.dif_joint_angles = ref_joint_pos - self.simulator.dof_pos
+            ## diff compute - kinematic joint velocity (关节角速度差异)
+            self.dif_joint_velocities = ref_joint_vel - self.simulator.dof_vel
 
-        ################### EXTEND Rigid body POS #####################
-        rotated_pos_in_parent = my_quat_rotate(
-            self.simulator._rigid_body_rot[:, self.extend_body_parent_ids].reshape(-1, 4),
-            self.extend_body_pos_in_parent.reshape(-1, 3)
-        )
-        extend_curr_pos = my_quat_rotate(
-            self.extend_body_rot_in_parent_xyzw.reshape(-1, 4),
-            rotated_pos_in_parent
-        ).view(self.num_envs, -1, 3) + self.simulator._rigid_body_pos[:, self.extend_body_parent_ids]
-        self._rigid_body_pos_extend = torch.cat([self.simulator._rigid_body_pos, extend_curr_pos], dim=1)
+            # ---------------------------------------------------------
+            # 4. 构建神经网络观测值 (Global to Local / Heading invariant)
+            # 关键一步：所有给神经网络的输入（Obs）都必须是相对于机器人自己的！
+            # ---------------------------------------------------------
+            # marker_coords 存下来用于 UI 界面渲染参考轨迹
+            self.marker_coords[:] = ref_body_pos_extend.reshape(B, -1, 3)
 
-        ################### EXTEND Rigid body Rotation #####################
-        extend_curr_rot = quat_mul(self.simulator._rigid_body_rot[:, self.extend_body_parent_ids].reshape(-1, 4),
-                                    self.extend_body_rot_in_parent_xyzw.reshape(-1, 4),
-                                    w_last=True).view(self.num_envs, -1, 4)
-        self._rigid_body_rot_extend = torch.cat([self.simulator._rigid_body_rot, extend_curr_rot], dim=1)
-        
-        ################### EXTEND Rigid Body Angular Velocity #####################
-        self._rigid_body_ang_vel_extend = torch.cat([self.simulator._rigid_body_ang_vel, self.simulator._rigid_body_ang_vel[:, self.extend_body_parent_ids]], dim=1)
-    
-        ################### EXTEND Rigid Body Linear Velocity #####################
-        self._rigid_body_ang_vel_global = self.simulator._rigid_body_ang_vel[:, self.extend_body_parent_ids]
-        angular_velocity_contribution = torch.cross(self._rigid_body_ang_vel_global, self.extend_body_pos_in_parent.view(self.num_envs, -1, 3), dim=2)
-        extend_curr_vel = self.simulator._rigid_body_vel[:, self.extend_body_parent_ids] + angular_velocity_contribution.view(self.num_envs, -1, 3)
-        self._rigid_body_vel_extend = torch.cat([self.simulator._rigid_body_vel, extend_curr_vel], dim=1)
+            env_batch_size = self.simulator._rigid_body_pos.shape[0]
+            num_rigid_bodies = self.simulator._rigid_body_pos.shape[1]
 
-        ################### Compute differences #####################
+            # 计算机器人“根节点(Root/躯干)”当前的偏航角(Heading/Yaw)的逆四元数。
+            # 为什么只要 Heading？因为我们希望忽略机器人朝向哪个方向（比如面朝北还是面朝南不重要），
+            # 但我们要保留俯仰（Pitch）和翻滚（Roll），因为这关乎机器人是否要摔倒。
+            heading_inv_rot = calc_heading_quat_inv(self.simulator.robot_root_states[:, 3:7].clone(), w_last=True)
+            
+            # 将逆四元数扩充形状，为了能通过批量矩阵运算一次性旋转所有刚体
+            heading_inv_rot_expand = heading_inv_rot.unsqueeze(1).expand(-1, num_rigid_bodies+self.num_extend_bodies, -1).reshape(-1, 4)
 
-        ## diff compute - kinematic position
-        self.dif_global_body_pos = ref_body_pos_extend - self._rigid_body_pos_extend
-        # import ipdb; ipdb.set_trace()
-        ## diff compute - kinematic rotation
-        self.dif_global_body_rot = quat_mul(ref_body_rot_extend, quat_conjugate(self._rigid_body_rot_extend, w_last=True), w_last=True)
-        
-        ## diff compute - kinematic velocity
-        self.dif_global_body_vel = ref_body_vel_extend - self._rigid_body_vel_extend
-        ## diff compute - kinematic angular velocity
-        
-        self.dif_global_body_ang_vel = ref_body_ang_vel_extend - self._rigid_body_ang_vel_extend
-        # ang_vel_reward = self._reward_teleop_body_ang_velocity_extend()
+            # 同样保留一下正向的 Heading 四元数备用
+            heading_rot = calc_heading_quat(self.simulator.robot_root_states[:, 3:7].clone(), w_last=True)
+            heading_rot_expand = heading_rot.unsqueeze(1).expand(-1, num_rigid_bodies, -1).reshape(-1, 4)
 
+            # 【观测值 1】：目标位置与当前实际位置的局部误差
+            # 先算出世界坐标系下的向量差，然后利用 heading_inv_rot 把它“扭”到机器人正前方的局部坐标系中
+            dif_global_body_pos_for_obs_compute = ref_body_pos_extend.view(env_batch_size, -1, 3) - self._rigid_body_pos_extend.view(env_batch_size, -1, 3)
+            dif_local_body_pos_flat = my_quat_rotate(heading_inv_rot_expand.view(-1, 4), dif_global_body_pos_for_obs_compute.view(-1, 3))
+            self._obs_dif_local_rigid_body_pos = dif_local_body_pos_flat.view(env_batch_size, -1) # 展平成 (num_envs, num_rigid_bodies*3) 供全连接网络使用
 
+            # 【观测值 2】：局部参考动作目标绝对位置（相对于机器人的躯干 root）
+            # 让机器人知道下一个目标点在自己的前/后/左/右哪个方位
+            global_ref_rigid_body_pos = ref_body_pos_extend.view(env_batch_size, -1, 3) - self.simulator.robot_root_states[:, :3].view(env_batch_size, 1, 3)  
+            local_ref_rigid_body_pos_flat = my_quat_rotate(heading_inv_rot_expand.view(-1, 4), global_ref_rigid_body_pos.view(-1, 3))
+            self._obs_local_ref_rigid_body_pos = local_ref_rigid_body_pos_flat.view(env_batch_size, -1) 
 
-        
-        ## diff compute - kinematic joint position
-        self.dif_joint_angles = ref_joint_pos - self.simulator.dof_pos
-        ## diff compute - kinematic joint velocity
-        self.dif_joint_velocities = ref_joint_vel - self.simulator.dof_vel
+            # 【观测值 3】：局部参考速度
+            # 将参考动作提供的“世界速度”，转换成相对于机器人躯干朝向的“局部速度”
+            global_ref_body_vel = ref_body_vel_extend.view(env_batch_size, -1, 3)
+            local_ref_rigid_body_vel_flat = my_quat_rotate(heading_inv_rot_expand.view(-1, 4), global_ref_body_vel.view(-1, 3))
+            self._obs_local_ref_rigid_body_vel = local_ref_rigid_body_vel_flat.view(env_batch_size, -1) 
 
-        
-
-
-
-        # marker_coords for visualization
-        self.marker_coords[:] = ref_body_pos_extend.reshape(B, -1, 3)
-
-        env_batch_size = self.simulator._rigid_body_pos.shape[0]
-        num_rigid_bodies = self.simulator._rigid_body_pos.shape[1]
-
-        heading_inv_rot = calc_heading_quat_inv(self.simulator.robot_root_states[:, 3:7].clone(), w_last=True)
-        # expand to (B*num_rigid_bodies, 4) for fatser computation in jit
-        heading_inv_rot_expand = heading_inv_rot.unsqueeze(1).expand(-1, num_rigid_bodies+self.num_extend_bodies, -1).reshape(-1, 4)
-
-        heading_rot = calc_heading_quat(self.simulator.robot_root_states[:, 3:7].clone(), w_last=True)
-        heading_rot_expand = heading_rot.unsqueeze(1).expand(-1, num_rigid_bodies, -1).reshape(-1, 4)
-
-        dif_global_body_pos_for_obs_compute = ref_body_pos_extend.view(env_batch_size, -1, 3) - self._rigid_body_pos_extend.view(env_batch_size, -1, 3)
-        dif_local_body_pos_flat = my_quat_rotate(heading_inv_rot_expand.view(-1, 4), dif_global_body_pos_for_obs_compute.view(-1, 3))
-        
-        self._obs_dif_local_rigid_body_pos = dif_local_body_pos_flat.view(env_batch_size, -1) # (num_envs, num_rigid_bodies*3)
-
-        global_ref_rigid_body_pos = ref_body_pos_extend.view(env_batch_size, -1, 3) - self.simulator.robot_root_states[:, :3].view(env_batch_size, 1, 3)  # preserves the body position
-        local_ref_rigid_body_pos_flat = my_quat_rotate(heading_inv_rot_expand.view(-1, 4), global_ref_rigid_body_pos.view(-1, 3))
-        self._obs_local_ref_rigid_body_pos = local_ref_rigid_body_pos_flat.view(env_batch_size, -1) # (num_envs, num_rigid_bodies*3)
-
-        global_ref_body_vel = ref_body_vel_extend.view(env_batch_size, -1, 3)
-        local_ref_rigid_body_vel_flat = my_quat_rotate(heading_inv_rot_expand.view(-1, 4), global_ref_body_vel.view(-1, 3))
-
-        self._obs_local_ref_rigid_body_vel = local_ref_rigid_body_vel_flat.view(env_batch_size, -1) # (num_envs, num_rigid_bodies*3)
-
-        ######################VR 3 point ########################
-        if not self.config.use_teleop_control:
-            ref_vr_3point_pos = ref_body_pos_extend.view(env_batch_size, -1, 3)[:, self.motion_tracking_id, :]
-        else:
-            ref_vr_3point_pos = self.teleop_marker_coords
-        vr_2root_pos = (ref_vr_3point_pos - self.simulator.robot_root_states[:, 0:3].view(env_batch_size, 1, 3))
-        heading_inv_rot_vr = heading_inv_rot.repeat(3,1)
-        self._obs_vr_3point_pos = my_quat_rotate(heading_inv_rot_vr.view(-1, 4), vr_2root_pos.view(-1, 3)).view(env_batch_size, -1)
-        #################### Deepmimic phase ###################### 
-
-        self._ref_motion_length = self._motion_lib.get_motion_length(self.motion_ids)
-        self._ref_motion_phase = motion_times / self._ref_motion_length
-        if not (torch.all(self._ref_motion_phase >= 0) and torch.all(self._ref_motion_phase <= 1.05)): # hard coded 1.05 because +1 will exceed 1
-            max_phase = self._ref_motion_phase.max()
-            # import ipdb; ipdb.set_trace()
-        self._ref_motion_phase = self._ref_motion_phase.unsqueeze(1)
-        # print(f"ref_motion_phase: {self._ref_motion_phase[0].item():.2f}")
-        # print(f"ref_motion_length: {self._ref_motion_length[0].item():.2f}")
-        
-        self._log_motion_tracking_info()
-
+            # ---------------------------------------------------------
+            # 5. VR/遥操作(Teleoperation) 相关观测值计算
+            # 很多机器人使用 VR 头显和双控制手柄（3个追踪点：头、左手、右手）进行遥操作。
+            # ---------------------------------------------------------
+            ######################VR 3 point ########################
+            if not self.config.use_teleop_control:
+                # 如果不是真正的遥操作控制，就把参考动作库里对应的 3 个点（头、双手）假装成 VR 信号
+                ref_vr_3point_pos = ref_body_pos_extend.view(env_batch_size, -1, 3)[:, self.motion_tracking_id, :]
+            else:
+                # 如果是遥控模式，读取真实的设备输入坐标
+                ref_vr_3point_pos = self.teleop_marker_coords
+                
+            # 计算 VR 目标点相对于机器人当前躯干的位置
+            vr_2root_pos = (ref_vr_3point_pos - self.simulator.robot_root_states[:, 0:3].view(env_batch_size, 1, 3))
+            heading_inv_rot_vr = heading_inv_rot.repeat(3,1)
+            # 转为局部坐标系
+            self._obs_vr_3point_pos = my_quat_rotate(heading_inv_rot_vr.view(-1, 4), vr_2root_pos.view(-1, 3)).view(env_batch_size, -1)
+            
+            # ---------------------------------------------------------
+            # 6. 步态相位 (Phase) 计算
+            # Phase 变量在机器人行走和 DeepMimic 中极其重要，它告诉策略当前动作进行到了哪一步（0~1）
+            # ---------------------------------------------------------
+            #################### Deepmimic phase ###################### 
+            self._ref_motion_length = self._motion_lib.get_motion_length(self.motion_ids) # 获取当前参考动作的总时长
+            self._ref_motion_phase = motion_times / self._ref_motion_length # 当前时间 / 总时长 = 进度条百分比 (0 到 1)
+            
+            # 检查 phase 是否越界 (硬编码 1.05 是因为前面我们为了预测未来帧加了 1 个 dt 的时间，可能会稍微超过 1.0)
+            if not (torch.all(self._ref_motion_phase >= 0) and torch.all(self._ref_motion_phase <= 1.05)): 
+                max_phase = self._ref_motion_phase.max()
+                # import ipdb; ipdb.set_trace() # 调试代码，越界时暂停
+                
+            # 增加一个维度以适配神经网络输入 (B, 1)
+            self._ref_motion_phase = self._ref_motion_phase.unsqueeze(1)
+            
+            # 记录追踪信息的日志（用于 Tensorboard 或终端打印）
+            self._log_motion_tracking_info()
+            
     def _compute_reward(self):
         super()._compute_reward()
         self.extras["ref_body_pos_extend"] = self.ref_body_pos_extend.clone()
