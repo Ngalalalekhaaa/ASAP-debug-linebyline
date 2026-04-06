@@ -536,7 +536,8 @@ class Genesis(BaseSimulator):
         """
         # self.scene.draw_debug_sphere(pos, radius, color)
         # 找到对应编号的小球，更新它的全局坐标
-        self.visualize_entities[pos_id].set_pos(pos.reshape(1, 3))
+        # 多环境时必须指定 envs_idx，否则 Genesis 会按 scene.n_envs 校验第一维，导致 shape 不匹配
+        self.visualize_entities[pos_id].set_pos(pos.reshape(1, 3), envs_idx=[env_id])
 
     def draw_line(self, start_point, end_point, color, env_id):
         """

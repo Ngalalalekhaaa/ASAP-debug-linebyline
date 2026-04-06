@@ -536,7 +536,7 @@ class Genesis(BaseSimulator):
 
     def draw_sphere(self, pos, radius, color, env_id, pos_id=0):
         # self.scene.draw_debug_sphere(pos, radius, color)
-        self.visualize_entities[pos_id].set_pos(pos.reshape(1, 3))
+        self.visualize_entities[pos_id].set_pos(pos.reshape(1, 3), envs_idx=[env_id])
 
     def draw_line(self, start_point, end_point, color, env_id):
         pass
