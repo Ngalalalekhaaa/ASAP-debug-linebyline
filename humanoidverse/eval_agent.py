@@ -260,6 +260,7 @@ def main(override_config: OmegaConf):
     # ---------------- 8. 启动死循环，开始评估 ----------------
     # 进入仿真的主循环：不断收集环境观测值 -> 神经网络输出关节命令 -> 环境执行命令步进仿真
     algo.evaluate_policy()
+    #algo.collect_delta_a_sim_data()
 
 # 标准 python 执行入口
 if __name__ == "__main__":

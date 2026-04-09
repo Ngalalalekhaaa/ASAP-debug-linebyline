@@ -820,6 +820,299 @@ class PPO(BaseAlgo):
             step += 1
         self._post_evaluate_policy() # (实际上这里 while True 执行不到)
 
+    # @torch.no_grad()
+    # def collect_delta_a_sim_data(self, num_collect_steps=1000, save_dir="logs_collect_data/delta_a_sim2sim_data/gym2gen"):
+    #         """
+    #         【函数作用】批量并行数据收集器（变长截断版）。
+    #         【防突变机制】自动监听环境的 reset 信号，只收集每个环境从出生到第一次重置之间的纯净连续轨迹。
+    #         """
+    #         import os
+    #         import numpy as np
+    #         import torch
+    #         from loguru import logger
+            
+    #         os.makedirs(save_dir, exist_ok=True)
+    #         logger.info(f"========== 开始批量收集 Delta-A 仿真连续数据 ==========")
+            
+    #         self._create_eval_callbacks() 
+    #         self._pre_evaluate_policy()
+    #         actor_state = self._create_actor_state()
+    #         self.eval_policy = self._get_inference_policy()
+    #         obs_dict = self.env.reset_all()
+    #         init_actions = torch.zeros(self.env.num_envs, self.num_act, device=self.device)
+    #         actor_state.update({"obs": obs_dict, "actions": init_actions})
+    #         actor_state = self._pre_eval_env_step(actor_state)
+            
+    #         T = num_collect_steps
+    #         N = self.env.num_envs
+            
+    #         buffer_pos = torch.zeros((T, N, 3), device=self.device)
+    #         buffer_quat = torch.zeros((T, N, 4), device=self.device)
+    #         buffer_lin_vel = torch.zeros((T, N, 3), device=self.device)
+    #         buffer_ang_vel = torch.zeros((T, N, 3), device=self.device)
+            
+    #         buffer_joint_pos = torch.zeros((T, N, self.env.num_dof), device=self.device)
+    #         buffer_joint_vel = torch.zeros((T, N, self.env.num_dof), device=self.device)
+    #         buffer_action = torch.zeros((T, N, self.num_act), device=self.device)
+            
+    #         # =========================================================================
+    #         # 【新增：生命周期追踪器】
+    #         # is_active: 记录当前哪些环境还在执行“第一次”动作 (没有被重置过)
+    #         # valid_lengths: 记录每个环境最终成功存活了多少帧
+    #         # =========================================================================
+    #         is_active = torch.ones(N, dtype=torch.bool, device=self.device)
+    #         valid_lengths = torch.zeros(N, dtype=torch.long, device=self.device)
+
+    #         for step in range(T):
+    #             actor_state["step"] = step
+    #             actor_state = self._pre_eval_env_step(actor_state) 
+    #             actions = actor_state["actions"]
+                
+    #             # 记录数据 (全量记录，后续靠 valid_lengths 截断)
+    #             if hasattr(self.env.simulator, "robot_root_states"):
+    #                 root_states = self.env.simulator.robot_root_states
+    #                 buffer_pos[step] = root_states[:, 0:3]
+    #                 buffer_quat[step] = root_states[:, 3:7]
+    #                 buffer_lin_vel[step] = root_states[:, 7:10]
+    #                 buffer_ang_vel[step] = root_states[:, 10:13]
+    #             elif hasattr(self.env, "base_pos"):
+    #                 buffer_pos[step] = self.env.base_pos
+    #                 buffer_quat[step] = self.env.base_quat
+    #                 buffer_lin_vel[step] = self.env.base_lin_vel
+    #                 buffer_ang_vel[step] = self.env.base_ang_vel
+                
+    #             buffer_joint_pos[step] = self.env.simulator.dof_pos
+    #             buffer_joint_vel[step] = self.env.simulator.dof_vel
+    #             buffer_action[step] = actions.detach()
+
+    #             # 物理引擎演进 (此时底层的重置逻辑可能被触发)
+    #             actor_state = self.env_step(actor_state) 
+                
+    #             # =====================================================================
+    #             # 【新增：寿命更新与突变拦截】
+    #             # =====================================================================
+    #             # 只要环境此时还是 active，它的有效长度就 +1
+    #             valid_lengths += is_active.long()
+                
+    #             # 检查哪些环境在这一步被重置了 (通常在 HumanoidVerse/LeggedGym 中用 reset_buf 表示)
+    #             if hasattr(self.env, "reset_buf"):
+    #                 # 如果发生了重置，将其 active 状态永久设为 False
+    #                 # ~self.env.reset_buf 意思是 "没有重置"
+    #                 is_active = is_active & (~self.env.reset_buf)
+                
+    #             # 如果所有的环境都重置过了（全军覆没，或者都完成了动作），提前结束！
+    #             if not is_active.any():
+    #                 logger.info(f"所有环境均已结束其首次生命周期，提前终止收集 (停在第 {step+1} 帧)")
+    #                 break
+
+    #             actor_state = self._post_eval_env_step(actor_state)
+                
+    #             if (step + 1) % 50 == 0:
+    #                 logger.info(f"收集进度: {step + 1} / {num_collect_steps} 帧, 存活环境数: {is_active.sum().item()}")
+
+    #         logger.info("仿真收集完毕，正在转移张量并进行变长切片...")
+    #         np_pos = buffer_pos.detach().cpu().numpy()
+    #         np_quat = buffer_quat.detach().cpu().numpy()
+    #         np_lin_vel = buffer_lin_vel.detach().cpu().numpy()
+    #         np_ang_vel = buffer_ang_vel.detach().cpu().numpy()
+    #         np_joint_pos = buffer_joint_pos.detach().cpu().numpy()
+    #         np_joint_vel = buffer_joint_vel.detach().cpu().numpy()
+    #         np_action = buffer_action.detach().cpu().numpy()
+            
+    #         dt = self.env.dt if hasattr(self.env, "dt") else 0.02
+
+    #         # =========================================================================
+    #         # 【新增：依据每个环境的真实寿命进行切片保存】
+    #         # =========================================================================
+    #         saved_count = 0
+    #         for env_idx in range(N):
+    #             # 获取该环境第一次重置前的实际连续帧数
+    #             seq_len = valid_lengths[env_idx].item()
+                
+    #             # 过滤太短的垃圾数据 (比如刚出生不到 10 帧就摔倒了，没有训练价值)
+    #             if seq_len < 10:
+    #                 continue
+                    
+    #             # 动态生成该序列的时间戳
+    #             np_time = np.arange(seq_len) * dt
+                    
+    #             # 精确切片：只截取 [0 : seq_len] 的连续纯净数据！
+    #             env_pos = np_pos[:seq_len, env_idx, :]
+    #             env_quat = np_quat[:seq_len, env_idx, :]
+    #             env_lin_vel = np_lin_vel[:seq_len, env_idx, :]
+    #             env_ang_vel = np_ang_vel[:seq_len, env_idx, :]
+    #             env_joint_pos = np_joint_pos[:seq_len, env_idx, :]
+    #             env_joint_vel = np_joint_vel[:seq_len, env_idx, :]
+    #             env_action = np_action[:seq_len, env_idx, :]
+
+    #             save_path = os.path.join(save_dir, f"motion_env{env_idx}_len{seq_len}.npz")
+                
+    #             np.savez(
+    #                 save_path,
+    #                 time=np_time,
+    #                 pos=env_pos,
+    #                 quat=env_quat,
+    #                 lin_vel=env_lin_vel,
+    #                 ang_vel=env_ang_vel,
+    #                 joint_pos=env_joint_pos,
+    #                 joint_vel=env_joint_vel,
+    #                 action=env_action,
+    #                 joint_pos_cmd=env_action
+    #             )
+    #             saved_count += 1
+
+    #         self._post_evaluate_policy()
+    #         logger.success(f"========== 收集结束！共成功保存了 {saved_count} 条无突变纯净轨迹 ==========")
+    #         logger.success(f"数据已保存在: {os.path.abspath(save_dir)}")
+          
+    @torch.no_grad()
+    def collect_delta_a_sim_data(self, num_collect_steps=1000, save_dir="logs_collect_data/delta_a_sim2sim_data/gym2gen"):
+        """
+        【函数作用】批量并行数据收集器（变长截断版 + 纯血 PKL 打包）。
+        【输出格式】完全复刻 ASAP 官方动作库格式，包含 5 个核心键 (root_trans_offset, pose_aa, dof, root_rot, fps)，并额外附加 Delta-A 需要的 action 键。
+        """
+        import os
+        import numpy as np
+        import torch
+        import joblib
+        from loguru import logger
+        from scipy.spatial.transform import Rotation as sRot  # 核心：用于四元数到轴角的高精度转换
+        
+        os.makedirs(save_dir, exist_ok=True)
+        logger.info(f"========== 开始批量收集 Delta-A 仿真连续数据 ==========")
+        
+        self._create_eval_callbacks() 
+        self._pre_evaluate_policy()
+        actor_state = self._create_actor_state()
+        self.eval_policy = self._get_inference_policy()
+        obs_dict = self.env.reset_all()
+        init_actions = torch.zeros(self.env.num_envs, self.num_act, device=self.device)
+        actor_state.update({"obs": obs_dict, "actions": init_actions})
+        actor_state = self._pre_eval_env_step(actor_state)
+        
+        T = num_collect_steps
+        N = self.env.num_envs
+        
+        # 预分配 GPU 张量缓冲区
+        buffer_pos = torch.zeros((T, N, 3), device=self.device)
+        buffer_quat = torch.zeros((T, N, 4), device=self.device)
+        buffer_joint_pos = torch.zeros((T, N, self.env.num_dof), device=self.device)
+        buffer_action = torch.zeros((T, N, self.num_act), device=self.device)
+        
+        is_active = torch.ones(N, dtype=torch.bool, device=self.device)
+        valid_lengths = torch.zeros(N, dtype=torch.long, device=self.device)
+
+        for step in range(T):
+            actor_state["step"] = step
+            actor_state = self._pre_eval_env_step(actor_state) 
+            actions = actor_state["actions"]
+            
+            # 抓取状态 (IsaacGym 的四元数默认是 xyzw，完美兼容 sRot)
+            if hasattr(self.env.simulator, "robot_root_states"):
+                root_states = self.env.simulator.robot_root_states
+                buffer_pos[step] = root_states[:, 0:3]
+                buffer_quat[step] = root_states[:, 3:7]  # xyzw 
+            elif hasattr(self.env, "base_pos"):
+                buffer_pos[step] = self.env.base_pos
+                buffer_quat[step] = self.env.base_quat
+            
+            buffer_joint_pos[step] = self.env.simulator.dof_pos
+            buffer_action[step] = actions.detach()
+
+            # 物理引擎演进
+            actor_state = self.env_step(actor_state) 
+            
+            valid_lengths += is_active.long()
+            
+            # 监听重置信号
+            if hasattr(self.env, "reset_buf"):
+                is_active = is_active & (~self.env.reset_buf)
+            
+            if not is_active.any():
+                logger.info(f"所有环境均已结束其首次生命周期，提前终止收集 (停在第 {step+1} 帧)")
+                break
+
+            actor_state = self._post_eval_env_step(actor_state)
+            
+            if (step + 1) % 50 == 0:
+                logger.info(f"收集进度: {step + 1} / {num_collect_steps} 帧, 存活环境数: {is_active.sum().item()}")
+
+        logger.info("仿真收集完毕，正在精确合成 ASAP 标准动作库字典 ...")
+        # 转移到 CPU 并转为 Numpy
+        np_pos = buffer_pos.detach().cpu().numpy()
+        np_quat = buffer_quat.detach().cpu().numpy()
+        np_joint_pos = buffer_joint_pos.detach().cpu().numpy()
+        np_action = buffer_action.detach().cpu().numpy()
+        
+        dt = self.env.dt if hasattr(self.env, "dt") else 0.02
+        fps_val = int(1.0 / dt) if dt > 0 else 50
+
+        # 获取电机的局部旋转轴 (dof_axis)，用于合成 pose_aa
+        # 形状通常为 (23, 3)
+        dof_axis_np = self._motion_lib.mesh_parsers.dof_axis.cpu().numpy() 
+        
+        # 判断配置中是否有扩展挂载点 (用于凑够 27 维)
+        if hasattr(self.config.robot.motion, "extend_config"):
+            num_augment_joint = len(self.config.robot.motion.extend_config)
+        else:
+            num_augment_joint = 3 # 默认 G1 有 3 个标记点
+
+        dataset_dict = {}
+        saved_count = 0
+        
+        for env_idx in range(N):
+            seq_len = valid_lengths[env_idx].item()
+            if seq_len < 10:
+                continue
+                
+            # 切片提取该环境的连续数据 (seq_len, dim)
+            env_pos = np_pos[:seq_len, env_idx, :]
+            env_quat = np_quat[:seq_len, env_idx, :]
+            env_joint_pos = np_joint_pos[:seq_len, env_idx, :]
+            env_action = np_action[:seq_len, env_idx, :]
+
+            # =========================================================================
+            # 【高精度合成 pose_aa】(严格对齐 27 维)
+            # =========================================================================
+            # 1. 躯干旋转 (Root): 四元数(xyzw) -> 旋转向量(Axis-Angle)
+            # 形状由 (seq_len, 3) 变为 (seq_len, 1, 3)
+            root_rot_vec = sRot.from_quat(env_quat).as_rotvec() 
+            root_rot_vec = root_rot_vec[:, np.newaxis, :]
+            
+            # 2. 关节旋转 (Joints): 关节角度标量 * 对应电机的 3D 旋转轴
+            # (seq_len, 23, 1) * (1, 23, 3) -> 广播计算得到 (seq_len, 23, 3)
+            joint_aa = env_joint_pos[:, :, np.newaxis] * dof_axis_np[np.newaxis, :, :]
+            
+            # 3. 虚拟追踪点填充 (Augment): 补齐零向量
+            # (seq_len, 3, 3)
+            augment_aa = np.zeros((seq_len, num_augment_joint, 3), dtype=np.float32)
+                
+            # 4. 沿刚体维度拼接: 1 + 23 + 3 = 27
+            # 最终 env_pose_aa 形状 -> (seq_len, 27, 3)
+            env_pose_aa = np.concatenate([root_rot_vec, joint_aa, augment_aa], axis=1)
+
+            # =========================================================================
+            # 【打包为官方 6 键格式 (剔除 smpl_joints，增加 action)】
+            # =========================================================================
+            motion_key = f"motion{env_idx}"
+            
+            dataset_dict[motion_key] = {
+                "root_trans_offset": env_pos.astype(np.float32),      # 对应 (119, 3)
+                "pose_aa": env_pose_aa.astype(np.float32),            # 对应 (119, 27, 3)
+                "dof": env_joint_pos.astype(np.float32),              # 对应 (119, 23)
+                "root_rot": env_quat.astype(np.float64),              # 对应 (119, 4)，对齐日志中的 float64
+                "fps": fps_val,                                       # 对应 30/50
+                "action": env_action.astype(np.float32)               # Delta-A 专属增量键!
+            }
+            saved_count += 1
+
+        save_path = os.path.join(save_dir, "collected_delta_a_dataset.pkl")
+        joblib.dump(dataset_dict, save_path)
+
+        self._post_evaluate_policy()
+        logger.success(f"========== 收集结束！共成功打包了 {saved_count} 条纯净轨迹 ==========")
+        logger.success(f"终极数据集已保存至: {os.path.abspath(save_path)}")  
+        
     def _create_actor_state(self):
         """【函数作用】生成空状态字典。 【被谁调用】evaluate_policy."""
         return {"done_indices": [], "stop": False}

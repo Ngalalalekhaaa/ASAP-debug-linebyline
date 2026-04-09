@@ -1,126 +1,189 @@
-import glob
-import os.path as osp
-import numpy as np
-import joblib
-import torch
-import random
+import glob # 用于查找匹配特定模式的文件路径名，比如遍历文件夹下的所有 .pkl 文件
+import os.path as osp # 路径处理工具
+import numpy as np # CPU 上的科学计算库
+import joblib # 序列化库，ASAP 框架使用它来读取和保存 .pkl 格式的动作库数据
+import torch # PyTorch，强化学习计算、神经网络和 GPU 物理仿真的心脏
+import random # 随机数生成，用于从动作库中随机截取动作片段
 
-from humanoidverse.utils.motion_lib.motion_utils.flags import flags
-from enum import Enum
-from humanoidverse.utils.motion_lib.skeleton import SkeletonTree
-from pathlib import Path
-from easydict import EasyDict
-from loguru import logger
-from rich.progress import track
+from humanoidverse.utils.motion_lib.motion_utils.flags import flags # 导入全局标志位配置（比如是否是真实的机器人轨迹）
+from enum import Enum # 导入枚举类基类，用于定义状态常量
+from humanoidverse.utils.motion_lib.skeleton import SkeletonTree # 骨骼树解析器，用来理解机器人的父子连杆层级结构
+from pathlib import Path # 面向对象的路径操作
+from easydict import EasyDict # 允许字典像属性一样用点（.）来访问的工具类
+from loguru import logger # 高级日志打印库，输出带有颜色和层级的信息
+from rich.progress import track # 终端进度条，在加载大型动作库时提供视觉反馈
 
+# 导入一堆底层的运动学旋转计算工具（因为在 3D 空间中，机器人的姿态几乎全靠四元数来计算）
 from isaac_utils.rotations import(
     quat_angle_axis,
     quat_inverse,
     quat_mul_norm,
     get_euler_xyz,
     normalize_angle,
-    slerp,
+    slerp, # Spherical Linear Interpolation (球面线性插值)，用于计算两个四元数之间的平滑过渡，极其关键！
     quat_to_exp_map,
     quat_to_angle_axis,
     quat_mul,
     quat_conjugate,
 )
 
+# ============================================================================
+# 枚举类定义
+# ============================================================================
 class FixHeightMode(Enum):
-    no_fix = 0
-    full_fix = 1
-    ankle_fix = 2
+    """定义是否要修复动作数据的高度的枚举类。动捕数据有时会因为参考系问题导致脚穿模或悬空，需要对齐地面。"""
+    no_fix = 0      # 不修复，原样使用
+    full_fix = 1    # 全局修复（通常找整个动作的最低点对齐地面）
+    ankle_fix = 2   # 根据脚踝位置修复
 
 class MotionlibMode(Enum):
-    file = 1
-    directory = 2
+    """定义动作库的加载模式"""
+    file = 1        # 只加载单个文件
+    directory = 2   # 加载整个文件夹里的所有 .pkl 文件
 
 
 def to_torch(tensor):
+    """一个安全转 PyTorch 张量的小工具。如果已经是张量就不管，如果是 numpy 数组就转成 PyTorch 张量。"""
     if torch.is_tensor(tensor):
         return tensor
     else:
         return torch.from_numpy(tensor)
 
+# ============================================================================
+# 核心类：动作库基类 (MotionLibBase)
+# 作用：充当模仿学习的“标准答案参考书”。负责把预先录制好的动捕数据加载到 GPU 显存中，
+# 并能根据任意给定的时间戳 t，瞬间插值计算出机器人此刻应该处于的完美姿势（位置、速度、姿态）。
+# ============================================================================
 class MotionLibBase():
     def __init__(self, motion_lib_cfg, num_envs, device):
-        self.m_cfg = motion_lib_cfg
-        self._sim_fps = 1/self.m_cfg.get("step_dt", 1/50)
+        """
+        【函数作用】：动作库初始化。读取配置文件，建立骨骼树，并把数据加载到内存。
+        【被谁调用】：通常被子类 `MotionLibRobot` 初始化时调用，或在 `LeggedRobotMotionTracking` 的 `_init_motion_lib()` 中实例化。
+        """
+        self.m_cfg = motion_lib_cfg # 保存动作库配置
+        self._sim_fps = 1/self.m_cfg.get("step_dt", 1/50) # 仿真器的物理运行频率（比如 50Hz）
         
-        self.num_envs = num_envs
-        self._device = device
-        self.mesh_parsers = None
-        self.has_action = False
+        self.num_envs = num_envs # 并行环境的数量（例如 4096）
+        self._device = device # 运行设备 (例如 cuda:0)
+        self.mesh_parsers = None # 网格解析器，通常在子类里被赋值，用来做正向运动学(FK)计算
+        self.has_action = False # ★关键标志：记录这个动作库里带不带现成的 action 指令（用于 Delta-A 残差训练）
+        
+        # 读取配置中的骨骼文件（如 XML/URDF），构建机器人的骨架树（知道谁连着谁，才能算正向运动学）
         skeleton_file = Path(self.m_cfg.asset.assetRoot) / self.m_cfg.asset.assetFileName
         self.skeleton_tree = SkeletonTree.from_mjcf(skeleton_file)
         logger.info(f"Loaded skeleton from {skeleton_file}")
         logger.info(f"Loading motion data from {self.m_cfg.motion_file}...")
+        
+        # 调用核心加载函数，把 .pkl 动作文件读入
         self.load_data(self.m_cfg.motion_file)
+        
+        # 初始化采样概率和缓冲区等常量
         self.setup_constants(fix_height = False,  multi_thread = False)
+        
+        # 如果是真实轨迹追踪（特定Flag），设置需要追踪的特定关节点索引
         if flags.real_traj:
             self.track_idx = self._motion_data_load[next(iter(self._motion_data_load))].get("track_idx", [19, 24, 29])
         return
         
     def load_data(self, motion_file, min_length=-1, im_eval = False):
+        """
+        【函数作用】：从硬盘读取 .pkl 文件到内存的字典中，并做初步过滤和排序。
+        【被谁调用】：自己类的 __init__。
+        """
         if osp.isfile(motion_file):
+            # 模式 1：传入的是单个文件的路径
             self.mode = MotionlibMode.file
             self._motion_data_load = joblib.load(motion_file)
         else:
+            # 模式 2：传入的是文件夹路径
             self.mode = MotionlibMode.directory
             self._motion_data_load = glob.glob(osp.join(motion_file, "*.pkl"))
+            
         data_list = self._motion_data_load
+        
         if self.mode == MotionlibMode.file:
             if min_length != -1:
+                # 过滤太短的动作片段，因为它们可能没有训练价值
                 # filtering the data by the length of the motion
                 data_list = {k: v for k, v in list(self._motion_data_load.items()) if len(v['pose_quat_global']) >= min_length}
             elif im_eval:
+                # 评估模式下，按动作片段的长度从长到短进行排序
                 # sorting the data by the length of the motion
                 data_list = {item[0]: item[1] for item in sorted(self._motion_data_load.items(), key=lambda entry: len(entry[1]['pose_quat_global']), reverse=True)}
             else:
                 data_list = self._motion_data_load
+                
+            # 将字典转为 numpy 数组列表，方便后续按索引抽取
             self._motion_data_list = np.array(list(data_list.values()))
             self._motion_data_keys = np.array(list(data_list.keys()))
         else:
             self._motion_data_list = np.array(self._motion_data_load)
             self._motion_data_keys = np.array(self._motion_data_load)
         
-        self._num_unique_motions = len(self._motion_data_list)
+        self._num_unique_motions = len(self._motion_data_list) # 记录这个库里总共有多少个不同的动作（比如 1个跳跃、1个跑）
+        
         if self.mode == MotionlibMode.directory:
             self._motion_data_load = joblib.load(self._motion_data_load[0]) # set self._motion_data_load to a sample of the data 
         logger.info(f"Loaded {self._num_unique_motions} motions")
 
     def setup_constants(self, fix_height = FixHeightMode.full_fix, multi_thread = True):
+        """
+        【函数作用】：初始化训练过程中的常量和采样概率池。
+        【被谁调用】：自己类的 __init__。
+        """
         self.fix_height = fix_height
         self.multi_thread = multi_thread
         
         #### Termination history
         self._curr_motion_ids = None
+        # 用于记录每个动作因为追踪失败被终止的次数（可用于后续计算困难样本挖掘）
         self._termination_history = torch.zeros(self._num_unique_motions).to(self._device)
         self._success_rate = torch.zeros(self._num_unique_motions).to(self._device)
         self._sampling_history = torch.zeros(self._num_unique_motions).to(self._device)
+        
+        # 初始时，所有动作被抽到的概率是平分的 (1 / 动作总数)
         self._sampling_prob = torch.ones(self._num_unique_motions).to(self._device) / self._num_unique_motions  # For use in sampling batches
 
     def get_motion_actions(self, motion_ids, motion_times):
+        """
+        【函数作用】：给定环境ID和时间，查询这个时间点对应的“原始动作(Action)指令”。
+        【RL 背景】：专为 Delta-A 残差训练设计！提取之前收集好的开环基准动作。
+        【被谁调用】：Delta-A 或开环训练循环，用来获取 open_loop_action。
+        """
         motion_len = self._motion_lengths[motion_ids]
         num_frames = self._motion_num_frames[motion_ids]
         dt = self._motion_dt[motion_ids]
         # import ipdb; ipdb.set_trace()
+        
+        # 计算当前时间落在由于采样造成的离散的哪两帧之间 (idx0, idx1)，并算出插值权重 blend
         frame_idx0, frame_idx1, blend = self._calc_frame_blend(motion_times, motion_len, num_frames, dt)
+        
+        # f0l 和 f1l 是在“全局展平的一维长条 Tensor”中的绝对索引位置
         f0l = frame_idx0 + self.length_starts[motion_ids]
         f1l = frame_idx1 + self.length_starts[motion_ids]
 
+        # 动作通常不需要极度平滑的插值，这里直接取靠前那一帧 (f0l) 的动作
         action = self._motion_actions[f0l]
         return action
 
     def get_motion_state(self, motion_ids, motion_times, offset=None):
+        """
+        【函数作用】：🌟全场最核心函数！🌟 根据当前时间 t，计算出机器人应该处于的完美物理状态。
+        【RL 背景】：通过在相邻两帧之间进行精准插值（Lerp/Slerp），保证无论怎么抽样时间戳，参考动画都是丝般顺滑的。
+        【被谁调用】：被上层环境的 `_pre_compute_observations_callback` 和 `_reset_root_states` 频繁调用。
+        """
         motion_len = self._motion_lengths[motion_ids]
         num_frames = self._motion_num_frames[motion_ids]
         dt = self._motion_dt[motion_ids]
 
+        # 1. 找到 t 时刻夹在哪两帧之间，blend 是靠近第二帧的比例 (0~1)
         frame_idx0, frame_idx1, blend = self._calc_frame_blend(motion_times, motion_len, num_frames, dt)
+        
+        # 换算为全局大数组中的绝对索引
         f0l = frame_idx0 + self.length_starts[motion_ids]
         f1l = frame_idx1 + self.length_starts[motion_ids]
 
+        # 2. 从显存大数组里把前后两帧的所有物理量全扒出来
         if "dof_pos" in self.__dict__:
             local_rot0 = self.dof_pos[f0l]
             local_rot1 = self.dof_pos[f1l]
@@ -140,35 +203,43 @@ class MotionLibBase():
         dof_vel0 = self.dvs[f0l]
         dof_vel1 = self.dvs[f1l]
 
+        # 检查数据类型防止使用 float64 导致 PyTorch 运算变慢
         vals = [local_rot0, local_rot1, body_vel0, body_vel1, body_ang_vel0, body_ang_vel1, rg_pos0, rg_pos1, dof_vel0, dof_vel1]
         for v in vals:
             assert v.dtype != torch.float64
 
+        # 扩充维度以准备进行批量插值计算
         blend = blend.unsqueeze(-1)
 
         blend_exp = blend.unsqueeze(-1)
 
+        # 3. 线性插值 (Lerp)：针对位置和速度
         if offset is None:
             rg_pos = (1.0 - blend_exp) * rg_pos0 + blend_exp * rg_pos1  # ZL: apply offset
         else:
+            # 如果传了 offset，说明要把动画平移到各个并行环境自己脚下踩的那个网格坐标原点上
             rg_pos = (1.0 - blend_exp) * rg_pos0 + blend_exp * rg_pos1 + offset[..., None, :]  # ZL: apply offset
 
         body_vel = (1.0 - blend_exp) * body_vel0 + blend_exp * body_vel1
         body_ang_vel = (1.0 - blend_exp) * body_ang_vel0 + blend_exp * body_ang_vel1
 
         if "dof_pos" in self.__dict__: # Robot Joints
+            # 如果存了关节角度，直接线性插值关节角度和速度
             dof_vel = (1.0 - blend) * dof_vel0 + blend * dof_vel1
             dof_pos = (1.0 - blend) * local_rot0 + blend * local_rot1
         else:
+            # 否则用 SMPL 骨骼模型自带的局部旋转去插值
             dof_vel = (1.0 - blend_exp) * dof_vel0 + blend_exp * dof_vel1
             local_rot = slerp(local_rot0, local_rot1, torch.unsqueeze(blend, axis=-1))
             dof_pos = self._local_rotation_to_dof_smpl(local_rot)
 
+        # 4. 球面线性插值 (Slerp)：针对四元数旋转矩阵。因为四元数不能直接线性相加，必须用 slerp 保证旋转平滑
         rb_rot0 = self.grs[f0l]
         rb_rot1 = self.grs[f1l]
         rb_rot = slerp(rb_rot0, rb_rot1, blend_exp)
         return_dict = {}
         
+        # 处理带有扩展追踪点（如掌心、剑尖等额外挂载点）的插值逻辑
         if "gts_t" in self.__dict__:
             rg_pos_t0 = self.gts_t[f0l]
             rg_pos_t1 = self.gts_t[f1l]
@@ -194,6 +265,7 @@ class MotionLibBase():
             body_vel_t = body_vel
             body_ang_vel_t = body_ang_vel
         
+        # 处理真机特供轨迹插值
         if flags.real_traj:
             q_body_ang_vel0, q_body_ang_vel1 = self.q_gavs[f0l], self.q_gavs[f1l]
             q_rb_rot0, q_rb_rot1 = self.q_grs[f0l], self.q_grs[f1l]
@@ -210,6 +282,7 @@ class MotionLibBase():
             body_vel[:, self.track_idx] = q_body_vel
             body_ang_vel[:, self.track_idx] = q_ang_vel
 
+        # 将最终插值出的“完美这一刻”打包成字典返回给环境
         return_dict.update({
             "root_pos": rg_pos[..., 0, :].clone(),
             "root_rot": rb_rot[..., 0, :].clone(),
@@ -219,11 +292,11 @@ class MotionLibBase():
             "dof_vel": dof_vel.view(dof_vel.shape[0], -1),
             "motion_aa": self._motion_aa[f0l],
             "motion_bodies": self._motion_bodies[motion_ids],
-            "rg_pos": rg_pos,
+            "rg_pos": rg_pos, # 所有刚体的全局位置
             "rb_rot": rb_rot,
             "body_vel": body_vel,
             "body_ang_vel": body_ang_vel,
-            "rg_pos_t": rg_pos_t,
+            "rg_pos_t": rg_pos_t, # 包含附加点的扩展状态
             "rg_rot_t": rg_rot_t,
             "body_vel_t": body_vel_t,
             "body_ang_vel_t": body_ang_vel_t,
@@ -235,6 +308,11 @@ class MotionLibBase():
                      start_idx=0, 
                      max_len=-1, 
                      target_heading = None):
+        """
+        【函数作用】：重火力部署阶段！将离散的动作片段进行解析、正向运动学推演，
+        最后拼接成极其巨大的 1D Tensor 存进 GPU 显存，极大地加速并行采样效率。
+        【被谁调用】：上层环境的 _init_motion_lib() 和 resample_motion()
+        """
         # import ipdb; ipdb.set_trace()
 
         motions = []
@@ -252,8 +330,9 @@ class MotionLibBase():
 
         total_len = 0.0
         self.num_joints = len(self.skeleton_tree.node_names)
-        num_motion_to_load = self.num_envs
+        num_motion_to_load = self.num_envs # 默认每个环境分配一个动作
 
+        # 根据概率转盘（multinomial）抽签，决定这数千个环境分别被分配去学哪一个动作
         if random_sample:
             sample_idxes = torch.multinomial(self._sampling_prob, num_samples=num_motion_to_load, replacement=True).to(self._device)
         else:
@@ -268,7 +347,11 @@ class MotionLibBase():
         logger.info(f"Current motion keys: {self.curr_motion_keys[:5]}, ....")
 
         motion_data_list = self._motion_data_list[sample_idxes.cpu().numpy()]
+        
+        # 调用核心骨骼绑定解析器，解算出具体每个帧下各刚体的坐标
         res_acc = self.load_motion_with_skeleton(motion_data_list, self.fix_height, target_heading, max_len)
+        
+        # 遍历解析结果，分别塞入各个 list 准备进行张量拼接
         for f in track(range(len(res_acc)), description="Loading motions..."):
             motion_file_data, curr_motion = res_acc[f]
             motion_fps = curr_motion.fps
@@ -276,6 +359,7 @@ class MotionLibBase():
             num_frames = curr_motion.global_rotation.shape[0]
             curr_len = 1.0 / motion_fps * (num_frames - 1)
 
+            # 存取体型参数和轴角参数（主要用于人体 SMPL 模型）
             if "beta" in motion_file_data:
                 _motion_aa.append(motion_file_data['pose_aa'].reshape(-1, self.num_joints * 3))
                 _motion_bodies.append(curr_motion.gender_beta)
@@ -288,6 +372,8 @@ class MotionLibBase():
             _motion_num_frames.append(num_frames)
             motions.append(curr_motion)
             _motion_lengths.append(curr_len)
+            
+            # 如果源文件中带有 action（比如之前为了 Delta-A 专门缝合进去的数据），保存下来
             if self.has_action:
                 _motion_actions.append(curr_motion.action)
             
@@ -299,6 +385,8 @@ class MotionLibBase():
                 
             del curr_motion
         
+        # ===== 显存大缝合术 =====
+        # 将上面一个个 append 的列表，统一转化为 GPU 张量
         self._motion_lengths = torch.tensor(_motion_lengths, device=self._device, dtype=torch.float32)
         self._motion_fps = torch.tensor(_motion_fps, device=self._device, dtype=torch.float32)
         self._motion_bodies = torch.stack(_motion_bodies).to(self._device).type(torch.float32)
@@ -308,9 +396,11 @@ class MotionLibBase():
         self._motion_num_frames = torch.tensor(_motion_num_frames, device=self._device)
         # import ipdb; ipdb.set_trace()
         if self.has_action:
+            # 将多段动作的首尾连起来，拼成一个超长的一维张量
             self._motion_actions = torch.cat(_motion_actions, dim=0).float().to(self._device)
         self._num_motions = len(motions)
         
+        # 真正用于物理插值的状态大军：全都 cat 到一起，推入 GPU。查询速度极快。
         self.gts = torch.cat([m.global_translation for m in motions], dim=0).float().to(self._device)
         self.grs = torch.cat([m.global_rotation for m in motions], dim=0).float().to(self._device)
         self.lrs = torch.cat([m.local_rotation for m in motions], dim=0).float().to(self._device)
@@ -335,6 +425,7 @@ class MotionLibBase():
             self.q_gavs = torch.cat(self.q_gavs, dim=0).float().to(self._device)
             self.q_gvs = torch.cat(self.q_gvs, dim=0).float().to(self._device)
         
+        # 建立“字典书签”：记录每个独立动作在这个超级长条中的起始行号 (cumsum)
         lengths = self._motion_num_frames
         lengths_shifted = lengths.roll(1)
         lengths_shifted[0] = 0
@@ -349,6 +440,9 @@ class MotionLibBase():
         return motions
 
     def fix_trans_height(self, pose_aa, trans, fix_height_mode):
+        """
+        【函数作用】：试算一遍正向运动学，找到动画中机器人身体的最低点，然后整体拔高，防止陷入地底。
+        """
         if fix_height_mode == FixHeightMode.no_fix:
             return trans, 0
         with torch.no_grad():
@@ -363,6 +457,10 @@ class MotionLibBase():
                                   fix_height,
                                   target_heading,
                                   max_len):
+        """
+        【函数作用】：对取出的源数据字典进行初步加工：随机截取、旋转重定向，最后交给 `mesh_parsers` 计算 FK。
+        【被谁调用】：自己类的 load_motions
+        """
         # loading motion with the specified skeleton. Perfoming forward kinematics to get the joint positions
         res = {}
         for f in track(range(len(motion_data_list)), description="Loading motions..."):
@@ -371,6 +469,7 @@ class MotionLibBase():
                 key = motion_data_list[f].split("/")[-1].split(".")[0]
                 curr_file = joblib.load(curr_file)[key]
 
+            # 处理最大长度截断 (Data Augmentation 技巧之一：随机截取动作片段防过拟合)
             seq_len = curr_file['root_trans_offset'].shape[0]
             if max_len == -1 or seq_len < max_len:
                 start, end = 0, seq_len
@@ -381,6 +480,8 @@ class MotionLibBase():
             trans = to_torch(curr_file['root_trans_offset']).clone()[start:end]
             pose_aa = to_torch(curr_file['pose_aa'][start:end]).clone()
             # import ipdb; ipdb.set_trace()
+            
+            # ★ 探针：如果原文件里带着我们之前为了 Delta-A 缝合进去的 action 键，则在这里被检测到
             if "action" in curr_file.keys():
                 self.has_action = True
             
@@ -388,6 +489,7 @@ class MotionLibBase():
 
             B, J, N = pose_aa.shape
 
+            # 处理重定向朝向（比如强行要求动作开始时机器人的朝向必须对齐某个角度）
             if not target_heading is None:
                 start_root_rot = sRot.from_rotvec(pose_aa[0, 0])
                 heading_inv_rot = sRot.from_quat(calc_heading_quat_inv(torch.from_numpy(start_root_rot.as_quat()[None, ])))
@@ -398,9 +500,12 @@ class MotionLibBase():
 
             if self.mesh_parsers is not None:
                 # trans, trans_fix = MotionLibRobot.fix_trans_height(pose_aa, trans, mesh_parsers, fix_height_mode = fix_height)
+                # 核心：将纯粹的关节轴角（pose_aa）喂进解析器，批量算出所有刚体的三维坐标和速度（FK）
                 curr_motion = self.mesh_parsers.fk_batch(pose_aa[None, ], trans[None, ], return_full= True, dt = dt)
                 curr_motion = EasyDict({k: v.squeeze() if torch.is_tensor(v) else v for k, v in curr_motion.items() })
+                
                 # add "action" to curr_motion
+                # 将文件里的 action 挂载到算好的 curr_motion 结构体上，传给下一步去拼接
                 if self.has_action:
                     curr_motion.action = to_torch(curr_file['action']).clone()[start:end]
                 res[f] = (curr_file, curr_motion)
@@ -410,30 +515,38 @@ class MotionLibBase():
     
 
     def num_motions(self):
+        """返回加载动作的个数"""
         return self._num_motions
 
 
     def get_total_length(self):
+        """返回所有动作加起来的总时长(秒)"""
         return sum(self._motion_lengths)
 
     def get_motion_num_steps(self, motion_ids=None):
+        """算出一个动作在当前的仿真频率下相当于跑了多少个 step"""
         if motion_ids is None:
             return (self._motion_num_frames * self._sim_fps / self._motion_fps).ceil().int()
         else:
             return (self._motion_num_frames[motion_ids] * self._sim_fps / self._motion_fps).ceil().int()
 
     def sample_time(self, motion_ids, truncate_time=None):
+        """
+        【函数作用】：随机出生点抽取器 (RSI 的灵魂)。
+        【RL 背景】：通过生成一个 0~1 的随机数 phase，算出每个环境应该从该段动作的第几秒开始起步。
+        """
         n = len(motion_ids)
         phase = torch.rand(motion_ids.shape, device=self._device)
         motion_len = self._motion_lengths[motion_ids]
         if (truncate_time is not None):
             assert (truncate_time >= 0.0)
-            motion_len -= truncate_time
+            motion_len -= truncate_time # 预留缓冲时间，免得一出生动作就结束了
 
         motion_time = phase * motion_len
         return motion_time.to(self._device)
 
     def get_motion_length(self, motion_ids=None):
+        """获取指定动作的长度"""
         if motion_ids is None:
             return self._motion_lengths
         else:
@@ -441,9 +554,14 @@ class MotionLibBase():
 
 
     def _calc_frame_blend(self, time, len, num_frames, dt):
+        """
+        【函数作用】：计算当前时间戳在两帧原始离散数据之间的插值权重。
+        【例如】：时间戳在 1.15 秒，而原始动画只有 1.1 秒（帧55）和 1.2 秒（帧56）的数据。
+        该函数会计算得出：idx0=55, idx1=56, blend=0.5
+        """
         time = time.clone()
         phase = time / len
-        phase = torch.clip(phase, 0.0, 1.0)  # clip time to be within motion length.
+        phase = torch.clip(phase, 0.0, 1.0)  # clip time to be within motion length. 卡死在 0 到 1 之间防越界
         time[time < 0] = 0
 
         frame_idx0 = (phase * (num_frames - 1)).long()
@@ -454,10 +572,12 @@ class MotionLibBase():
 
 
     def _get_num_bodies(self):
+        """获取机器人的刚体数量"""
         return self.num_bodies
 
 
     def _local_rotation_to_dof_smpl(self, local_rot):
+        """将局部的四元数旋转矩阵，转化为通过指数映射计算出的关节角度（SMPL 模型专用的数学转换）"""
         B, J, _ = local_rot.shape
         dof_pos = quat_to_exp_map(local_rot[:, 1:])
         return dof_pos.reshape(B, -1)
