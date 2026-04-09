@@ -73,8 +73,8 @@ class DeltaA_OpenLoop(LeggedRobotMotionTracking):
         self.delta_action_cnt += 1
 
 
-        print("self.delta_action_dof_heatmaps", self.delta_action_dof_heatmaps)
-        print("self.detla_action_percentage_heatmaps", self.detla_action_percentage_heatmaps)
+        # print("self.delta_action_dof_heatmaps", self.delta_action_dof_heatmaps)
+        # print("self.detla_action_percentage_heatmaps", self.detla_action_percentage_heatmaps)
         # import ipdb; ipdb.set_trace()
         # print("motion_action", motion_action)
         # print("motion_action", motion_action)
