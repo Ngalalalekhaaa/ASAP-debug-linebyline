@@ -629,6 +629,70 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         # 先执行父类后处理：刷新状态、计算奖励、终止判断、重置等基础流程都在父类里完成。
         super()._post_physics_step()
 
+        # ========================= 评估期奖励追踪（新增） =========================
+        # 目标：在 eval 时记录“每一步奖励”与“整回合 return（含终止步奖励）”，并直接打印到终端用于比较模型。
+        # 说明：
+        # 1) self.rew_buf 是本步总奖励（已包含各项奖励与 termination 项）；
+        # 2) 在父类 super()._post_physics_step() 内，reset 已经执行完，但 reset_buf/time_out_buf 仍可用于识别本步结束的 episode；
+        # 3) 因此在这里统计不会漏掉“最后一步奖励”。
+        if self.is_evaluating:
+            # 懒初始化：仅在首次进入评估步时创建缓存。
+            if not hasattr(self, "_eval_return_tracker_ready"):
+                # 当前 episode 的累计回报（按 env 独立累计）。
+                self._eval_episode_returns = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+                # 当前 episode 的逐步奖励序列（按 env 独立 list）。
+                self._eval_episode_step_rewards = [[] for _ in range(self.num_envs)]
+                # 每个 env 已完成了多少个 episode（用于编号）。
+                self._eval_episode_index = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+                # 仅保留轻量统计用于终端显示（不落盘）。
+                self._eval_completed_returns = []
+                self._eval_completed_lengths = []
+
+                self._eval_return_tracker_ready = True
+
+            # 逐步累积：将本步奖励计入每个 env 的当前 episode。
+            step_rewards_cpu = self.rew_buf.detach().cpu()
+            for env_idx in range(self.num_envs):
+                rew_i = float(step_rewards_cpu[env_idx].item())
+                self._eval_episode_returns[env_idx] += rew_i
+                self._eval_episode_step_rewards[env_idx].append(rew_i)
+
+            # 检测本步结束的 episode（timeout 或其它终止）。
+            done_ids = torch.nonzero(self.reset_buf.bool(), as_tuple=False).flatten().tolist()
+            for env_idx in done_ids:
+                # 整回合 return（已包含最后一步奖励）。
+                ep_return = float(self._eval_episode_returns[env_idx].item())
+                # 回合长度：使用 last_episode_length_buf（避免 reset 后被清零）。
+                ep_length = int(self.last_episode_length_buf[env_idx].item()) if hasattr(self, "last_episode_length_buf") else len(self._eval_episode_step_rewards[env_idx])
+                # 回合结束类型：优先标注 timeout，其它归为 terminated。
+                done_type = "timeout" if bool(self.time_out_buf[env_idx].item()) else "terminated"
+                # episode 编号。
+                ep_idx = int(self._eval_episode_index[env_idx].item())
+
+                # 汇总到全局已完成回合统计（用于实时均值显示）。
+                self._eval_completed_returns.append(ep_return)
+                self._eval_completed_lengths.append(ep_length)
+                recent_n = 20#最近20回合的均值
+                recent_returns = self._eval_completed_returns[-recent_n:]
+                recent_lengths = self._eval_completed_lengths[-recent_n:]
+                recent_return_mean = float(np.mean(recent_returns)) if len(recent_returns) > 0 else 0.0
+                recent_length_mean = float(np.mean(recent_lengths)) if len(recent_lengths) > 0 else 0.0
+                total_finished = len(self._eval_completed_returns)
+
+                # 控制台打印：每个结束回合输出一行摘要 + 最近20回合均值。
+                print(colored(
+                    f"[eval-return] env={env_idx} ep={ep_idx} done={done_type} len={ep_length} return={ep_return:.6f} | "
+                    f"recent{min(recent_n, total_finished)}_mean_return={recent_return_mean:.6f} "
+                    f"recent{min(recent_n, total_finished)}_mean_len={recent_length_mean:.2f} total_finished={total_finished}",
+                    "cyan"
+                ))
+
+                # 清空该 env 当前 episode 缓存，开始下一回合统计。
+                self._eval_episode_returns[env_idx] = 0.0
+                self._eval_episode_step_rewards[env_idx] = []
+                self._eval_episode_index[env_idx] += 1
+        # ======================================================================
+
         # 若未开启保存动作，直接退出，不做任何额外记录。
         if not self.save_motion:
             # 提前返回，避免无意义的 CPU 拷贝与列表追加。

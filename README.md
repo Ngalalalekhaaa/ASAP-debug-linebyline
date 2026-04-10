@@ -301,8 +301,29 @@ algo.config.num_learning_iterations=1000
 
 ```
 
+## sim2sim 为训练delta-a模型收集数据
 
+```
+HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py   +checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt   +env.config.save_motion=True   +env.config.save_note=first_life   +env.config.eval_timestamp=$(date +%Y%m%d_%H%M%S) +simulator=genesis
+```
 
+## 查看收集到的.pkl格式数据（在check_pkl_content.py中改为要查看文件的路径）
+
+```
+python logs_collect_data/check_pkl_content.py
+```
+
+## 后台训练
+
+```
+nohup python humanoidverse/train_agent.py   +simulator=isaacgym   +exp=train_delta_a_open_loop   +domain_rand=NO_domain_rand   +rewards=motion_tracking/delta_a/reward_delta_a_openloop   +robot=g1/g1_29dof_anneal_23dof   +terrain=terrain_locomotion_plane   +obs=delta_a/open_loop   num_envs=4096   project_name=DeltaA_Training   experiment_name=openloopDeltaA_training   robot.motion.motion_file="/home/liuhenghui/ASAP/logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/first_life_20260409220350.pkl"   env.config.max_episode_length_s=1.0   rewards.reward_scales.penalty_minimal_action_norm=-0.1   +device=cuda:1   env.config.resample_motion_when_training=True   env.config.resample_time_interval_s=10000   > openloopDeltaA_training_motionfile20260409220350_cuda1.log 2>&1 &
+```
+
+## 查看后台日志
+
+```
+tail -f openloopDeltaA_training_motionfile20260409220350_cuda1.log
+```
 
 
 # Motion Retargeting to Any Humanoid

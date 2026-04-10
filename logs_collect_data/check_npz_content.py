@@ -75,7 +75,7 @@ if __name__ == "__main__":
     view_npz_contents(sample_file, print_preview=True, num_steps=1)
     
     
-#     python humanoidverse/train_agent.py \
+# nohup python humanoidverse/train_agent.py \
 #   +simulator=isaacgym \
 #   +exp=train_delta_a_open_loop \
 #   +domain_rand=NO_domain_rand \
@@ -83,12 +83,13 @@ if __name__ == "__main__":
 #   +robot=g1/g1_29dof_anneal_23dof \
 #   +terrain=terrain_locomotion_plane \
 #   +obs=delta_a/open_loop \
-#   num_envs=64 \
+#   num_envs=4096 \
 #   project_name=DeltaA_Training \
 #   experiment_name=openloopDeltaA_training \
-#   robot.motion.motion_file="/home/luckysir/ASAP/logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/first_life_20260409142036.pkl" \
+#   robot.motion.motion_file="/home/liuhenghui/ASAP/logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/first_life_20260409220350.pkl" \
 #   env.config.max_episode_length_s=1.0 \
 #   rewards.reward_scales.penalty_minimal_action_norm=-0.1 \
-#   +device=cuda:0 \
+#   +device=cuda:1 \
 #   env.config.resample_motion_when_training=True \
-#   env.config.resample_time_interval_s=10000
+#   env.config.resample_time_interval_s=10000 \
+#   > openloopDeltaA_training_motionfile20260409220350_cuda1.log 2>&1 &
