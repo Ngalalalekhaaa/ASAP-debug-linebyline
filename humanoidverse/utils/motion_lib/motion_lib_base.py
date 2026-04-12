@@ -131,8 +131,8 @@ class MotionLibBase():
         【函数作用】：初始化训练过程中的常量和采样概率池。
         【被谁调用】：自己类的 __init__。
         """
-        self.fix_height = fix_height
-        self.multi_thread = multi_thread
+        self.fix_height = fix_height  # 是否对动作数据的高度进行修正（FixHeightMode 枚举），防止动捕数据悬空或穿地。常用于数据预处理。
+        self.multi_thread = multi_thread  # 是否启用多线程处理动作数据（如加载、插值等），提升大数据集处理速度。
         
         #### Termination history
         self._curr_motion_ids = None

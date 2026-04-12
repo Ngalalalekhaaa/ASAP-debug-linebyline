@@ -313,16 +313,52 @@ HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py   +checkpoint=logs/MotionT
 python logs_collect_data/check_pkl_content.py
 ```
 
+## 编辑器手动快速修改命令参数
+
+```
+/home/luckysir/ASAP/logs_collect_data/check_npz_content.py
+```
+
+
 ## 后台训练
 
 ```
-nohup python humanoidverse/train_agent.py   +simulator=isaacgym   +exp=train_delta_a_open_loop   +domain_rand=NO_domain_rand   +rewards=motion_tracking/delta_a/reward_delta_a_openloop   +robot=g1/g1_29dof_anneal_23dof   +terrain=terrain_locomotion_plane   +obs=delta_a/open_loop   num_envs=4096   project_name=DeltaA_Training   experiment_name=openloopDeltaA_training   robot.motion.motion_file="/home/liuhenghui/ASAP/logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/first_life_20260409220350.pkl"   env.config.max_episode_length_s=1.0   rewards.reward_scales.penalty_minimal_action_norm=-0.1   +device=cuda:1   env.config.resample_motion_when_training=True   env.config.resample_time_interval_s=10000   > openloopDeltaA_training_motionfile20260409220350_cuda1.log 2>&1 &
+nohup python humanoidverse/train_agent.py   +simulator=isaacgym   
+
++exp=train_delta_a_open_loop   +domain_rand=NO_domain_rand   +rewards=motion_tracking/
+
+delta_a/reward_delta_a_openloop   +robot=g1/g1_29dof_anneal_23dof   
+
++terrain=terrain_locomotion_plane   +obs=delta_a/open_loop   num_envs=4096   
+
+project_name=DeltaA_Training   experiment_name=openloopDeltaA_training   robot.motion.
+
+motion_file="/home/liuhenghui/ASAP/logs/MotionTracking/
+
+20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/
+
+first_life_20260409220350.pkl"   env.config.max_episode_length_s=1.0   rewards.reward_scales.penalty_minimal_action_norm=-0.1   +device=cuda:1   env.config.resample_motion_when_training=True   env.config.resample_time_interval_s=10000   > openloopDeltaA_training_motionfile20260409220350_cuda1.log 2>&1 &
 ```
 
-## 查看后台日志
+## 动态查看后台日志的尾行
 
 ```
-tail -f openloopDeltaA_training_motionfile20260409220350_cuda1.log
+tail -f -n 100 openloopDeltaA_training_motionfile20260409220350_cuda1.log
+#-f:实时查看。-n:查看的行数
+```
+
+## 滚动查看日志的指定行
+
+```
+less -R openloopDeltaA_training_motionfile20260409220350_cuda1.log
+#-R:ANSI颜色解析
+```
+
+## 通过端口重映射查看服务器上训练情况的tensorboard
+
+```
+ssh -L 6006:localhost:6007 liuhenghui@192.168.1.101
+#-L:本地端口映射到远程端口。6007：若远程端口被占用，可使用其他端口号
 ```
 
 
