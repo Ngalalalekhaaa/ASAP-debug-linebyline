@@ -98,10 +98,10 @@ def view_pkl_contents(file_path, num_rows=5):
 # ==========================================
 if __name__ == "__main__":
     # 1. 指定你的 .pkl 文件路径
-    pkl_file_path = "/home/luckysir/ASAP/logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/first_life_20260409142036.pkl"
+    pkl_file_path = "/home/luckysir/ASAP/logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum2_20260413154610.pkl"
     
     # 2. 调整你想查看的行数 (时间步数)
     # 把这里的 5 改成你想看的数字，比如 20, 50, 100
-    display_rows = 5 
+    display_rows = 3 
     
     view_pkl_contents(pkl_file_path, num_rows=display_rows)

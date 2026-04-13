@@ -120,9 +120,21 @@ if __name__ == "__main__":
 # > closeloopDeltaA_10000ptopen0412mtnum2_12300pt0208_cuda7.log 2>&1 &
 
 
-# HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
-# +checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt \
-# +env.config.save_motion=True \
-# +env.config.save_note=mtnum128 \
-# +env.config.eval_timestamp=$(date +%Y%m%d_%H%M%S) \
-# +simulator=genesis
+HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
++checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt \
++env.config.save_motion=True \
++env.config.save_note=timeoutonly_mtnum1 \
++env.config.eval_timestamp=$(date +%Y%m%d_%H%M%S) \
++simulator=genesis
+
+
+python logs_collect_data/replay_motion_in_sim.py \
++simulator=genesis \
++exp=motion_tracking \
++domain_rand=NO_domain_rand \
++rewards=motion_tracking/delta_a/reward_delta_a_openloop \
++robot=g1/g1_29dof_anneal_23dof \
++terrain=terrain_locomotion_plane \
++obs=motion_tracking/deepmimic_a2c_nolinvel_LARGEnoise_history \
++visualize_motion_file="/home/luckysir/ASAP/logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum4_20260413154759.pkl" \
++motion_key=motion0
