@@ -86,20 +86,20 @@ if __name__ == "__main__":
 #   num_envs=4096 \
 #   project_name=DeltaA_Training \
 #   experiment_name=openloopDeltaA_training \
-#   robot.motion.motion_file="/home/liuhenghui/ASAP/logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/first_life_20260409142036.pkl" \
+#   robot.motion.motion_file="/home/liuhenghui/ASAP/logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/mtnum128_20260412110741.pkl" \
 #   env.config.max_episode_length_s=1.0 \
 #   rewards.reward_scales.penalty_minimal_action_norm=-0.1 \
-#   +device=cuda:4 \
+#   +device=cuda:2 \
 #   env.config.resample_motion_when_training=True \
 #   env.config.resample_time_interval_s=10000 \
-#   > openloopDeltaA_training_motionfile20260409142036_cuda4.log 2>&1 &
+#   > openloopDeltaA_202604121122_mtnum128_20260412110741_cuda2.log 2>&1 &
 
 
 # HYDRA_FULL_ERROR=1 \
 # nohup python humanoidverse/train_agent.py \
 # +simulator=isaacgym \
 # +exp=train_delta_a_closed_loop \
-# algo.config.policy_checkpoint="logs/DeltaA_Training/20260410_105832-openloopDeltaA_training-delta_a-g1_29dof_anneal_23dof/model_5100.pt" \
+# algo.config.policy_checkpoint="logs/DeltaA_Training/20260412_102648-openloopDeltaA_training-delta_a-g1_29dof_anneal_23dof/model_10000.pt" \
 # +domain_rand=NO_domain_rand_finetune_with_deltaA \
 # +rewards=motion_tracking/reward_motion_tracking_dm_simfinetuning \
 # +robot=g1/g1_29dof_anneal_23dof \
@@ -114,7 +114,15 @@ if __name__ == "__main__":
 # domain_rand.push_robots=False \
 # env.config.noise_to_initial_level=1 \
 # rewards.reward_penalty_curriculum=True \
-# +device=cuda:1 \
-# algo.config.save_interval=5 \
+# +device=cuda:7 \
+# algo.config.save_interval=100 \
 # algo.config.num_learning_iterations=20000 \
-# > closeloopDeltaA_5100ptopen0409_12300pt0208_cuda1.log 2>&1 &
+# > closeloopDeltaA_10000ptopen0412mtnum2_12300pt0208_cuda7.log 2>&1 &
+
+
+# HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
+# +checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt \
+# +env.config.save_motion=True \
+# +env.config.save_note=mtnum128 \
+# +env.config.eval_timestamp=$(date +%Y%m%d_%H%M%S) \
+# +simulator=genesis

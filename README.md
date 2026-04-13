@@ -304,7 +304,12 @@ algo.config.num_learning_iterations=1000
 ## sim2sim 为训练delta-a模型收集数据
 
 ```
-HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py   +checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt   +env.config.save_motion=True   +env.config.save_note=first_life   +env.config.eval_timestamp=$(date +%Y%m%d_%H%M%S) +simulator=genesis
+HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
++checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt \
++env.config.save_motion=True \
++env.config.save_note=mtnum128 \
++env.config.eval_timestamp=$(date +%Y%m%d_%H%M%S) \
++simulator=genesis
 ```
 
 ## 查看收集到的.pkl格式数据（在check_pkl_content.py中改为要查看文件的路径）
@@ -359,6 +364,12 @@ less -R openloopDeltaA_training_motionfile20260409220350_cuda1.log
 ```
 ssh -L 6006:localhost:6007 liuhenghui@192.168.1.101
 #-L:本地端口映射到远程端口。6007：若远程端口被占用，可使用其他端口号
+```
+
+## 查找当前包含关键字的进程
+
+```
+ps aux | grep train_agent.py
 ```
 
 

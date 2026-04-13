@@ -480,18 +480,24 @@ class LeggedRobotBase(BaseTask):
     def _update_reset_buf(self):
         # 1. 不该碰地的部位（比如身体、大腿）碰地了，直接判死
         if self.config.termination.terminate_by_contact:
-            self.reset_buf |= torch.any(torch.norm(self.simulator.contact_forces[:, self.termination_contact_indices, :], dim=-1) > 1., dim=1)
+            skip_motion_far_for_saving = getattr(self, "save_motion", False)
+            if not skip_motion_far_for_saving:
+                self.reset_buf |= torch.any(torch.norm(self.simulator.contact_forces[:, self.termination_contact_indices, :], dim=-1) > 1., dim=1)
 
         # 2. 严重倾斜侧翻（通过投影重力判定），判死
         if self.config.termination.terminate_by_gravity:
             # print(self.projected_gravity)
-            self.reset_buf |= torch.any(torch.abs(self.projected_gravity[:, 0:1]) > self.config.termination_scales.termination_gravity_x, dim=1)
-            self.reset_buf |= torch.any(torch.abs(self.projected_gravity[:, 1:2]) > self.config.termination_scales.termination_gravity_y, dim=1)
+            skip_motion_far_for_saving = getattr(self, "save_motion", False)
+            if not skip_motion_far_for_saving:
+                self.reset_buf |= torch.any(torch.abs(self.projected_gravity[:, 0:1]) > self.config.termination_scales.termination_gravity_x, dim=1)
+                self.reset_buf |= torch.any(torch.abs(self.projected_gravity[:, 1:2]) > self.config.termination_scales.termination_gravity_y, dim=1)
         
         # 3. 基座高度太低（比如深蹲起不来了或者直接趴下），判死
         if self.config.termination.terminate_by_low_height:
             # import ipdb; ipdb.set_trace()
-            self.reset_buf |= torch.any(self.simulator.robot_root_states[:, 2:3] < self.config.termination_scales.termination_min_base_height, dim=1)
+            skip_motion_far_for_saving = getattr(self, "save_motion", False)
+            if not skip_motion_far_for_saving:
+                self.reset_buf |= torch.any(self.simulator.robot_root_states[:, 2:3] < self.config.termination_scales.termination_min_base_height, dim=1)
 
         # 4. 触碰关节软限制（为了保护真机的硬件极限而设置的）
         if self.config.termination.terminate_when_close_to_dof_pos_limit:
@@ -502,7 +508,9 @@ class LeggedRobotBase(BaseTask):
             # get random number between 0 and 1, if it is smaller than self.config.termination_probality.terminate_when_close_to_dof_pos_limit, apply the termination
             # 有一定概率被判死，不用绝对一刀切，给网络一定的探索空间
             if torch.rand(1) < self.config.termination_probality.terminate_when_close_to_dof_pos_limit:
-                self.reset_buf |= out_of_dof_pos_limits > 0.
+                skip_motion_far_for_saving = getattr(self, "save_motion", False)
+                if not skip_motion_far_for_saving:
+                    self.reset_buf |= out_of_dof_pos_limits > 0.
         
         # 5. 速度超限判死
         if self.config.termination.terminate_when_close_to_dof_vel_limit:
@@ -511,14 +519,18 @@ class LeggedRobotBase(BaseTask):
             
 
             if torch.rand(1) < self.config.termination_probality.terminate_when_close_to_dof_vel_limit:
-                self.reset_buf |= out_of_dof_vel_limits > 0.
+                skip_motion_far_for_saving = getattr(self, "save_motion", False)
+                if not skip_motion_far_for_saving:
+                    self.reset_buf |= out_of_dof_vel_limits > 0.
         
         # 6. 力矩超限判死
         if self.config.termination.terminate_when_close_to_torque_limit:
             out_of_torque_limits = torch.sum((torch.abs(self.torques) - self.torque_limits * self.config.termination_scales.termination_close_to_torque_limit).clip(min=0., max=1.), dim=1)
             
             if torch.rand(1) < self.config.termination_probality.terminate_when_close_to_torque_limit:
-                self.reset_buf |= out_of_torque_limits > 0.
+                skip_motion_far_for_saving = getattr(self, "save_motion", False)
+                if not skip_motion_far_for_saving:
+                    self.reset_buf |= out_of_torque_limits > 0.
 
 
     """
