@@ -1,5 +1,6 @@
 # pyright: reportMissingImports=false
 import os
+import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -20,6 +21,35 @@ def _to_torch(x, device, dtype):
     import torch
 
     return torch.as_tensor(x, device=device, dtype=dtype)
+
+
+def _to_bool(v, default=False):
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    if isinstance(v, str):
+        return v.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+    return bool(v)
+
+
+def _infer_motion_env_id(motion_key: str) -> Optional[int]:
+    m = re.fullmatch(r"motion(\d+)", str(motion_key))
+    if m is None:
+        return None
+    return int(m.group(1))
+
+
+def _grid_origin_from_env_id(env_id: int, env_spacing: float, source_num_envs: int):
+    import math
+
+    num_cols = int(math.floor(math.sqrt(source_num_envs)))
+    num_cols = max(num_cols, 1)
+    row = env_id // num_cols
+    col = env_id % num_cols
+    return np.array([env_spacing * row, env_spacing * col, 0.0], dtype=np.float32)
 
 
 def _pick_motion_key(motion_data: dict, motion_key: Optional[str], motion_index: int):
@@ -60,14 +90,16 @@ def _ensure_required_groups(cfg: DictConfig):
 def main(cfg: DictConfig):
     # 让脚本默认可视化模式更友好
     cfg.headless = False
-    cfg.num_envs = 1
+    cfg.num_envs = int(cfg.get("replay_num_envs", 1))
     _ensure_required_groups(cfg)
 
     # 读取用户传入参数（通过 Hydra 的 +key=value）
     motion_file = cfg.get("visualize_motion_file", None)
     motion_key = cfg.get("motion_key", None)
     motion_index = int(cfg.get("motion_index", 0))
-    loop = bool(cfg.get("loop", True))
+    loop = _to_bool(cfg.get("loop", True), default=True)
+    recenter_nonzero_to_origin = _to_bool(cfg.get("recenter_nonzero_to_origin", False), default=False)
+    source_num_envs_for_origin = int(cfg.get("source_num_envs_for_origin", 4096))
 
     if motion_file is None:
         raise ValueError("请通过 +visualize_motion_file=... 指定 pkl 文件路径。")
@@ -124,6 +156,10 @@ def main(cfg: DictConfig):
 
     logger.info(f"Replay motion: {key}")
     logger.info(f"Frames: {num_frames}, fps: {fps}")
+    logger.info(f"Replay num_envs: {cfg.num_envs}")
+    logger.info(f"recenter_nonzero_to_origin: {recenter_nonzero_to_origin}")
+    if recenter_nonzero_to_origin:
+        logger.info(f"source_num_envs_for_origin: {source_num_envs_for_origin}")
     logger.info("按 Ctrl+C 可退出。")
 
     sim = env.simulator
@@ -134,10 +170,30 @@ def main(cfg: DictConfig):
     dof_state = torch.zeros((env.num_envs, sim.num_dof, 2), device=env.device, dtype=torch.float32)
     zero_torque = torch.zeros((env.num_envs, sim.num_dof), device=env.device, dtype=torch.float32)
 
+    # 用于“把非0号环境平移到原点附近显示”的偏移量。
+    # 规则：env0 不动；env1..N 的根位置额外加上 -env_origins[env_id]。
+    env_root_recenter_offsets = torch.zeros((env.num_envs, 3), device=env.device, dtype=torch.float32)
+    if recenter_nonzero_to_origin and env.num_envs > 1:
+        if hasattr(env, "env_origins"):
+            env_origins = env.env_origins.to(device=env.device, dtype=torch.float32)
+            env_root_recenter_offsets[1:] = -env_origins[1:]
+        else:
+            logger.warning("当前环境没有 env_origins，无法执行 recenter_nonzero_to_origin。")
+
+    # 单环境回放时，优先使用“数据本身”做平移：
+    # 把当前 motion 的首帧根位置 XY 平移到原点（Z 不变），
+    # 这样不依赖采集时 num_envs / spacing，任何 motionK 都能稳定显示在原点附近。
+    if recenter_nonzero_to_origin and env.num_envs == 1:
+        first_root = _to_torch(root_trans[0], env.device, torch.float32)
+        env_root_recenter_offsets[0, 0:2] = -first_root[0:2]
+        logger.info(
+            f"single-env recenter by first-frame XY, shift={env_root_recenter_offsets[0].detach().cpu().tolist()}"
+        )
+
     while True:
         for i in range(num_frames):
             # 1) 写入目标根状态
-            root_state[:, 0:3] = _to_torch(root_trans[i], env.device, torch.float32)
+            root_state[:, 0:3] = _to_torch(root_trans[i], env.device, torch.float32) + env_root_recenter_offsets
             root_state[:, 3:7] = _to_torch(root_rot[i], env.device, torch.float32)
             root_state[:, 7:10] = _to_torch(root_lin_vel[i], env.device, torch.float32)
             root_state[:, 10:13] = _to_torch(root_ang_vel[i], env.device, torch.float32)

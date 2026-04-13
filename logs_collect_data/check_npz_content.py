@@ -136,5 +136,7 @@ python logs_collect_data/replay_motion_in_sim.py \
 +robot=g1/g1_29dof_anneal_23dof \
 +terrain=terrain_locomotion_plane \
 +obs=motion_tracking/deepmimic_a2c_nolinvel_LARGEnoise_history \
-+visualize_motion_file="/home/luckysir/ASAP/logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum4_20260413154759.pkl" \
-+motion_key=motion0
++visualize_motion_file="/home/luckysir/ASAP/logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum8_20260413155020.pkl" \
++replay_num_envs=1 \
++recenter_nonzero_to_origin=True \
++motion_key=motion6

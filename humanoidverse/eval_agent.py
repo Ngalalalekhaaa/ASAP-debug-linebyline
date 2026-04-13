@@ -64,6 +64,12 @@ def on_press(key, env):
 # 函数 2: listen_for_keypress
 # ============================================================================
 def listen_for_keypress(env):
+    try:
+        from pynput import keyboard
+    except Exception as e:
+        logger.warning(f"Keyboard listener disabled (pynput unavailable): {e}")
+        return
+
     # 使用 with 语句启动键盘监听器，传入上面定义的 on_press 规则，使用 lambda 把 env 传进去
     with keyboard.Listener(on_press=lambda key: on_press(key, env)) as listener:
         listener.join() # 阻塞当前线程，持续监听，直到程序结束
@@ -228,6 +234,12 @@ def main(override_config: OmegaConf):
     # ---------------- 7. 模型导出部署阶段 (Sim2Real 必备) ----------------
     EXPORT_POLICY = False # 是否导出为 TorchScript JIT 格式
     EXPORT_ONNX = True # 是否导出为 ONNX 格式（主流的跨平台、跨语言推理框架）
+
+    # 当启用 save_motion 采集时，导出 ONNX 会触发一次额外 reset_all（get_example_obs），
+    # 可能污染“首生命”采样统计，因此默认跳过导出。
+    if bool(getattr(config.env.config, "save_motion", False)):
+        EXPORT_ONNX = False
+        logger.info("save_motion=True: disable ONNX export in eval to avoid extra warmup reset.")
 
     checkpoint_path = str(checkpoint)
     checkpoint_dir = os.path.dirname(checkpoint_path)
