@@ -40,7 +40,7 @@ def main(config: OmegaConf):
         simulation_app = app_launcher.app  
         
         # import ipdb; ipdb.set_trace()
-    if simulator_type == 'IsaacGym':
+    if simulator_type == 'IsaacGym':#细节先导入isaacgym，后续再导入torch，否则可能会有问题
         import isaacgym  # noqa: F401
 
 
@@ -93,7 +93,7 @@ def main(config: OmegaConf):
     else:
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
     
-    pre_process_config(config)
+    pre_process_config(config)#从配置中读取并计算actor和critic网络观测值维度，作为2个网络输入维度，写入机器人的网络配置中，后续在构建网络时会用到这些维度信息
 
     # torch.set_float32_matmul_precision("medium")
 
@@ -106,7 +106,7 @@ def main(config: OmegaConf):
     #         rank = 0
     #     fabric.seed_everything(config.seed + rank)
     #     seeding(config.seed + rank, torch_deterministic=config.torch_deterministic)
-    config.env.config.save_rendering_dir = str(Path(config.experiment_dir) / "renderings_training")
+    config.env.config.save_rendering_dir = str(Path(config.experiment_dir) / "renderings_training")#Path是python中pathlib库的高级对象，为了方便且跨平台连接路径；str是为了转换回原始字符串，后续C++接口可能只认字符串路径
     env: BaseEnv = instantiate(config=config.env, device=device)
 
 
@@ -115,7 +115,7 @@ def main(config: OmegaConf):
 
     logger.info(f"Saving config file to {experiment_save_dir}")
     with open(experiment_save_dir / "config.yaml", "w") as file:
-        OmegaConf.save(unresolved_conf, file)
+        OmegaConf.save(unresolved_conf, file)#实验目录下的config.yaml文件（外层的，不是.hydra文件夹下的）
 
     algo: BaseAlgo = instantiate(device=device, env=env, config=config.algo, log_dir=experiment_save_dir)
     algo.setup()

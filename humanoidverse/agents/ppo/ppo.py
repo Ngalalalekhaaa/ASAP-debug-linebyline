@@ -1,6 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import joblib
+import numpy as np
+import re
+import csv
+from pathlib import Path
 
 from humanoidverse.agents.modules.ppo_modules import PPOActor, PPOCritic
 from humanoidverse.agents.modules.data_utils import RolloutStorage
@@ -8,6 +13,7 @@ from humanoidverse.envs.base_task.base_task import BaseTask
 from humanoidverse.agents.base_algo.base_algo import BaseAlgo
 from humanoidverse.agents.callbacks.base_callback import RL_EvalCallback
 from humanoidverse.utils.average_meters import TensorAverageMeterDict
+from isaac_utils.rotations import my_quat_rotate
 
 from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 import time
@@ -820,6 +826,617 @@ class PPO(BaseAlgo):
             step += 1
         self._post_evaluate_policy() # (实际上这里 while True 执行不到)
 
+    @torch.no_grad()
+    def evaluate_policy_for_mpjpe(self, pkl_path=None, motion_keys=None, max_steps=None, fallback_env_id=0, csv_path=None, step_csv_path=None):
+        """
+        【函数作用】基于离线采集的 pkl 逐帧回灌状态和动作，计算仿真器与数据源环境的误差指标。
+        【执行逻辑】
+        1) 将数据集第 t 帧状态强制写回仿真器；
+        2) 执行动作 t，得到仿真下一帧；
+        3) 与数据集第 t+1 帧做误差比较；
+        4) 统计每个动作段平均值 + 导出汇总 CSV + 导出逐步 CSV。
+        【参数说明】
+        - pkl_path: 离线动作数据集路径。
+        - motion_keys: 仅评估指定动作键；None 表示全量评估。
+        - max_steps: 每条动作最多评估多少步；None 表示用该动作全长。
+        - fallback_env_id: motion_key 不能映射 env_id 时使用的兜底 env。
+        - csv_path: 汇总 CSV 输出路径（每个动作一行 + overall 一行）。
+        - step_csv_path: 逐步 CSV 输出路径（每个时间步一行）。
+        【指标定义】
+        - E_g-mpjpe: 全局身体位置误差 (mm)
+        - E_mpjpe: 根节点对齐后的平均关节误差 (mm)
+        - E_acc: 加速度误差 (mm/frame^2)
+        - E_vel: 根节点速度误差 (mm/frame)
+        """
+        self._eval_mode()
+        self.env.set_is_evaluating()
+        _ = self.env.reset_all()
+
+        # 1) 加载并筛选动作数据
+        dataset_path = self._resolve_mpjpe_dataset_path(pkl_path)
+        dataset_dict = joblib.load(dataset_path)
+        if not isinstance(dataset_dict, dict) or len(dataset_dict) == 0:
+            raise ValueError(f"Invalid dataset in {dataset_path}. Expect non-empty dict.")
+
+        selected_keys = self._select_motion_keys_for_mpjpe(dataset_dict, motion_keys)
+
+        # metrics_per_motion: 每个动作段的平均指标
+        metrics_per_motion = {}
+        # total_steps + weighted_sum: 用“按步数加权”方式汇总 overall 指标
+        total_steps = 0
+        weighted_sum = {
+            "E_g_mpjpe_mm": 0.0,
+            "E_mpjpe_mm": 0.0,
+            "E_acc_mm_per_frame2": 0.0,
+            "E_vel_mm_per_frame": 0.0,
+        }
+        # step_metrics_rows: 逐时间步原始误差，用于导出 step-level CSV
+        step_metrics_rows = []
+
+        for motion_key in selected_keys:
+            motion_data = dataset_dict[motion_key]
+            # 逐帧状态回灌至少需要这些字段
+            required_keys = ["root_trans_offset", "root_rot", "dof", "action", "pose_aa"]
+            missing = [k for k in required_keys if k not in motion_data]
+            if len(missing) > 0:
+                logger.warning(f"Skip {motion_key}: missing keys {missing}")
+                continue
+
+            # motion_key -> env_id 的映射（如 motion17 -> env 17）
+            env_id = self._select_env_id_for_mpjpe(motion_key, fallback_env_id)
+
+            # 目标轨迹状态与动作（来自离线采集）
+            root_pos = torch.as_tensor(motion_data["root_trans_offset"], dtype=torch.float, device=self.device)
+            root_rot = torch.as_tensor(motion_data["root_rot"], dtype=torch.float, device=self.device)
+            dof_pos = torch.as_tensor(motion_data["dof"], dtype=torch.float, device=self.device)
+            actions = torch.as_tensor(motion_data["action"], dtype=torch.float, device=self.device)
+
+            dof_vel = None
+            if "dof_vel" in motion_data:
+                dof_vel = torch.as_tensor(motion_data["dof_vel"], dtype=torch.float, device=self.device)
+
+            root_lin_vel = None
+            if "root_lin_vel" in motion_data:
+                root_lin_vel = torch.as_tensor(motion_data["root_lin_vel"], dtype=torch.float, device=self.device)
+
+            root_ang_vel = None
+            if "root_ang_vel" in motion_data:
+                root_ang_vel = torch.as_tensor(motion_data["root_ang_vel"], dtype=torch.float, device=self.device)
+
+            # 用 FK 从 pose_aa 构建 GT 的刚体位置（与仿真侧位姿做对比）
+            gt_body_pos = self._build_gt_body_positions_for_mpjpe(motion_data)
+
+            # 多个字段长度可能不一致，统一截到最短帧数
+            frame_count = min(
+                root_pos.shape[0],
+                root_rot.shape[0],
+                dof_pos.shape[0],
+                actions.shape[0],
+                gt_body_pos.shape[0],
+            )
+            if dof_vel is not None:
+                frame_count = min(frame_count, dof_vel.shape[0])
+            if root_lin_vel is not None:
+                frame_count = min(frame_count, root_lin_vel.shape[0])
+            if root_ang_vel is not None:
+                frame_count = min(frame_count, root_ang_vel.shape[0])
+
+            if frame_count < 2:
+                logger.warning(f"Skip {motion_key}: frame_count={frame_count} < 2")
+                continue
+
+            # 一次比较使用 (t -> t+1)，所以可评估步数是 frame_count - 1
+            steps = frame_count - 1
+            if max_steps is not None:
+                steps = min(steps, int(max_steps))
+            if steps <= 0:
+                logger.warning(f"Skip {motion_key}: no valid steps after max_steps")
+                continue
+
+            fps = float(motion_data.get("fps", 0.0))
+            if fps <= 0.0:
+                if hasattr(self.env, "dt") and self.env.dt > 0:
+                    fps = 1.0 / float(self.env.dt)
+                else:
+                    fps = 50.0
+            # 若 root_lin_vel 是 m/s，这里将其换算成 mm/frame 便于和指标单位一致
+            mm_per_frame_from_mps = 1000.0 / fps
+
+            # action_full: 环境级动作缓冲，仅把目标 env_id 那一行写成数据集动作
+            action_full = torch.zeros(self.env.num_envs, self.num_act, device=self.device)
+            # 逐步误差缓存（后面先求动作均值，再写 CSV）
+            g_mpjpe_steps = []
+            mpjpe_steps = []
+            vel_steps = []
+            # pred/gt 序列用于二阶差分估计 E_acc
+            pred_body_seq = []
+            gt_body_seq = []
+            pred_root_vel_seq = []
+            gt_root_vel_seq = []
+
+            for t in range(steps):
+                self._set_env_state_for_mpjpe(
+                    env_id=env_id,
+                    root_pos_t=root_pos[t],
+                    root_rot_t=root_rot[t],
+                    dof_pos_t=dof_pos[t],
+                    dof_vel_t=(dof_vel[t] if dof_vel is not None else None),
+                    root_lin_vel_t=(root_lin_vel[t] if root_lin_vel is not None else None),
+                    root_ang_vel_t=(root_ang_vel[t] if root_ang_vel is not None else None),
+                )
+
+                action_full.zero_()
+                action_full[env_id] = self._fit_vector_dim_for_mpjpe(actions[t], self.num_act)
+
+                actor_state = {"step": t, "actions": action_full}
+                actor_state = self._pre_eval_env_step_for_mpjpe(actor_state)
+                actor_state = self.env_step_for_mpjpe(actor_state)
+                actor_state = self._post_eval_env_step_for_mpjpe(actor_state)
+
+                # 仿真下一帧与离线下一帧对齐比较
+                pred_next_body = self._get_sim_body_positions_for_mpjpe(env_id)
+                gt_next_body = gt_body_pos[t + 1]
+
+                valid_body_num = min(pred_next_body.shape[0], gt_next_body.shape[0])
+                pred_next_body = pred_next_body[:valid_body_num]
+                gt_next_body = gt_next_body[:valid_body_num]
+
+                g_err = torch.norm(pred_next_body - gt_next_body, dim=-1).mean() * 1000.0
+                pred_rel = pred_next_body - pred_next_body[0:1]
+                gt_rel = gt_next_body - gt_next_body[0:1]
+                rel_err = torch.norm(pred_rel - gt_rel, dim=-1).mean() * 1000.0
+
+                g_mpjpe_steps.append(float(g_err.item()))
+                mpjpe_steps.append(float(rel_err.item()))
+                pred_body_seq.append(pred_next_body.detach().cpu())
+                gt_body_seq.append(gt_next_body.detach().cpu())
+
+                if root_lin_vel is not None:
+                    # 优先使用数据集中提供的 root_lin_vel 进行速度误差计算
+                    sim_root_vel = self.env.simulator.robot_root_states[env_id, 7:10]
+                    gt_root_vel = root_lin_vel[t + 1]
+                    vel_err = torch.norm((sim_root_vel - gt_root_vel) * mm_per_frame_from_mps)
+                    pred_root_vel_seq.append((sim_root_vel * mm_per_frame_from_mps).detach().cpu())
+                    gt_root_vel_seq.append((gt_root_vel * mm_per_frame_from_mps).detach().cpu())
+                else:
+                    # 没有 root_lin_vel 时，退化为位置差分近似速度（单位 mm/frame）
+                    sim_root_disp = (self.env.simulator.robot_root_states[env_id, 0:3] - root_pos[t]) * 1000.0
+                    gt_root_disp = (root_pos[t + 1] - root_pos[t]) * 1000.0
+                    vel_err = torch.norm(sim_root_disp - gt_root_disp)
+                    pred_root_vel_seq.append(sim_root_disp.detach().cpu())
+                    gt_root_vel_seq.append(gt_root_disp.detach().cpu())
+
+                vel_steps.append(float(vel_err.item()))
+
+            e_acc = 0.0
+            # e_acc_steps 与 step 对齐：由于二阶差分从第 2 帧才有值，所以前几个位置可能是 None
+            e_acc_steps = [None for _ in range(steps)]
+            if len(pred_body_seq) >= 3:
+                pred_seq = torch.stack(pred_body_seq, dim=0)
+                gt_seq = torch.stack(gt_body_seq, dim=0)
+                pred_acc = pred_seq[2:] - 2.0 * pred_seq[1:-1] + pred_seq[:-2]
+                gt_acc = gt_seq[2:] - 2.0 * gt_seq[1:-1] + gt_seq[:-2]
+                acc_err = torch.norm(pred_acc - gt_acc, dim=-1).mean(dim=-1) * 1000.0
+                e_acc = float(acc_err.mean().item())
+                acc_err_list = acc_err.detach().cpu().tolist()
+                for idx, val in enumerate(acc_err_list):
+                    # idx+1: 将二阶差分结果尽量对齐到中心时刻步
+                    e_acc_steps[idx + 1] = float(val)
+            elif len(pred_root_vel_seq) >= 2:
+                pred_vel = torch.stack(pred_root_vel_seq, dim=0)
+                gt_vel = torch.stack(gt_root_vel_seq, dim=0)
+                acc_err = torch.norm((pred_vel[1:] - pred_vel[:-1]) - (gt_vel[1:] - gt_vel[:-1]), dim=-1)
+                e_acc = float(acc_err.mean().item())
+                acc_err_list = acc_err.detach().cpu().tolist()
+                for idx, val in enumerate(acc_err_list):
+                    e_acc_steps[idx + 1] = float(val)
+
+            motion_metrics = {
+                "env_id": int(env_id),
+                "num_steps": int(steps),
+                "E_g_mpjpe_mm": float(np.mean(g_mpjpe_steps)) if len(g_mpjpe_steps) > 0 else 0.0,
+                "E_mpjpe_mm": float(np.mean(mpjpe_steps)) if len(mpjpe_steps) > 0 else 0.0,
+                "E_acc_mm_per_frame2": e_acc,
+                "E_vel_mm_per_frame": float(np.mean(vel_steps)) if len(vel_steps) > 0 else 0.0,
+            }
+            metrics_per_motion[motion_key] = motion_metrics
+
+            # 把逐步原始误差写成结构化行，后续统一导出 step CSV
+            for t in range(steps):
+                step_metrics_rows.append(
+                    {
+                        "dataset_path": dataset_path,
+                        "motion_key": motion_key,
+                        "env_id": int(env_id),
+                        "step_index": int(t),
+                        "source_frame": int(t),
+                        "target_frame": int(t + 1),
+                        "E_g_mpjpe_mm": float(g_mpjpe_steps[t]),
+                        "E_mpjpe_mm": float(mpjpe_steps[t]),
+                        "E_vel_mm_per_frame": float(vel_steps[t]),
+                        "E_acc_mm_per_frame2": ("" if e_acc_steps[t] is None else float(e_acc_steps[t])),
+                    }
+                )
+
+            total_steps += motion_metrics["num_steps"]
+            weighted_sum["E_g_mpjpe_mm"] += motion_metrics["E_g_mpjpe_mm"] * motion_metrics["num_steps"]
+            weighted_sum["E_mpjpe_mm"] += motion_metrics["E_mpjpe_mm"] * motion_metrics["num_steps"]
+            weighted_sum["E_acc_mm_per_frame2"] += motion_metrics["E_acc_mm_per_frame2"] * motion_metrics["num_steps"]
+            weighted_sum["E_vel_mm_per_frame"] += motion_metrics["E_vel_mm_per_frame"] * motion_metrics["num_steps"]
+
+            logger.info(
+                f"[{motion_key}] env={env_id} steps={steps} | "
+                f"E_g-mpjpe={motion_metrics['E_g_mpjpe_mm']:.4f} mm | "
+                f"E_mpjpe={motion_metrics['E_mpjpe_mm']:.4f} mm | "
+                f"E_acc={motion_metrics['E_acc_mm_per_frame2']:.4f} mm/frame^2 | "
+                f"E_vel={motion_metrics['E_vel_mm_per_frame']:.4f} mm/frame"
+            )
+
+        # 2) 计算 overall（按有效步数加权）
+        if total_steps > 0:
+            overall_metrics = {
+                "E_g_mpjpe_mm": weighted_sum["E_g_mpjpe_mm"] / total_steps,
+                "E_mpjpe_mm": weighted_sum["E_mpjpe_mm"] / total_steps,
+                "E_acc_mm_per_frame2": weighted_sum["E_acc_mm_per_frame2"] / total_steps,
+                "E_vel_mm_per_frame": weighted_sum["E_vel_mm_per_frame"] / total_steps,
+                "num_steps": int(total_steps),
+                "num_motions": int(len(metrics_per_motion)),
+            }
+        else:
+            overall_metrics = {
+                "E_g_mpjpe_mm": 0.0,
+                "E_mpjpe_mm": 0.0,
+                "E_acc_mm_per_frame2": 0.0,
+                "E_vel_mm_per_frame": 0.0,
+                "num_steps": 0,
+                "num_motions": int(len(metrics_per_motion)),
+            }
+
+        logger.info("================ MPJPE Evaluation Summary ================")
+        logger.info(f"Dataset: {dataset_path}")
+
+        logger.info("============ Per-motion Average Metrics (Final) ============")
+        for motion_key in sorted(metrics_per_motion.keys(), key=self._motion_key_sort_for_mpjpe):
+            motion_metrics = metrics_per_motion[motion_key]
+            logger.info(
+                f"{motion_key} | steps={motion_metrics['num_steps']} | "
+                f"E_g-mpjpe={motion_metrics['E_g_mpjpe_mm']:.4f} mm | "
+                f"E_mpjpe={motion_metrics['E_mpjpe_mm']:.4f} mm | "
+                f"E_acc={motion_metrics['E_acc_mm_per_frame2']:.4f} mm/frame^2 | "
+                f"E_vel={motion_metrics['E_vel_mm_per_frame']:.4f} mm/frame"
+            )
+
+        logger.info(
+            f"Overall | E_g-mpjpe={overall_metrics['E_g_mpjpe_mm']:.4f} mm | "
+            f"E_mpjpe={overall_metrics['E_mpjpe_mm']:.4f} mm | "
+            f"E_acc={overall_metrics['E_acc_mm_per_frame2']:.4f} mm/frame^2 | "
+            f"E_vel={overall_metrics['E_vel_mm_per_frame']:.4f} mm/frame | "
+            f"motions={overall_metrics['num_motions']} | steps={overall_metrics['num_steps']}"
+        )
+
+        # 3) 导出两类 CSV：汇总 + 逐步
+        csv_output_path = self._resolve_mpjpe_csv_path(dataset_path, csv_path)
+        self._save_mpjpe_metrics_to_csv(
+            csv_output_path=csv_output_path,
+            dataset_path=dataset_path,
+            metrics_per_motion=metrics_per_motion,
+            overall_metrics=overall_metrics,
+        )
+        logger.info(f"MPJPE CSV saved to: {csv_output_path}")
+
+        step_csv_output_path = self._resolve_mpjpe_step_csv_path(dataset_path, step_csv_path)
+        self._save_mpjpe_step_metrics_to_csv(
+            step_csv_output_path=step_csv_output_path,
+            step_metrics_rows=step_metrics_rows,
+        )
+        logger.info(f"MPJPE step CSV saved to: {step_csv_output_path}")
+
+        return {
+            "dataset_path": dataset_path,
+            "csv_path": csv_output_path,
+            "step_csv_path": step_csv_output_path,
+            "metrics_per_motion": metrics_per_motion,
+            "overall": overall_metrics,
+        }
+
+    def _motion_key_sort_for_mpjpe(self, motion_key):
+        """【函数作用】对 motion key 做稳定排序：优先按末尾数字排序，其次按字符串排序。"""
+        matched = re.search(r"(\d+)$", motion_key)
+        if matched is None:
+            return (1, motion_key)
+        return (0, int(matched.group(1)))
+
+    def _resolve_mpjpe_csv_path(self, dataset_path, csv_path):
+        """【函数作用】解析汇总 CSV 的最终输出路径；未指定时自动生成时间戳文件名。"""
+        if csv_path is None:
+            dataset_stem = Path(dataset_path).stem
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            csv_path = str(Path(dataset_path).with_name(f"{dataset_stem}_mpjpe_eval_{timestamp}.csv"))
+
+        path = Path(str(csv_path)).expanduser()
+        if not path.is_absolute():
+            path = (Path.cwd() / path).resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return str(path)
+
+    def _resolve_mpjpe_step_csv_path(self, dataset_path, step_csv_path):
+        """【函数作用】解析逐步误差 CSV 的最终输出路径；未指定时自动生成时间戳文件名。"""
+        if step_csv_path is None:
+            dataset_stem = Path(dataset_path).stem
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            step_csv_path = str(Path(dataset_path).with_name(f"{dataset_stem}_mpjpe_eval_steps_{timestamp}.csv"))
+
+        path = Path(str(step_csv_path)).expanduser()
+        if not path.is_absolute():
+            path = (Path.cwd() / path).resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return str(path)
+
+    def _save_mpjpe_metrics_to_csv(self, csv_output_path, dataset_path, metrics_per_motion, overall_metrics):
+        """【函数作用】导出汇总 CSV：每个动作一行 + overall 一行。"""
+        fieldnames = [
+            "row_type",
+            "dataset_path",
+            "motion_key",
+            "env_id",
+            "num_steps",
+            "E_g_mpjpe_mm",
+            "E_mpjpe_mm",
+            "E_acc_mm_per_frame2",
+            "E_vel_mm_per_frame",
+            "num_motions",
+        ]
+
+        with open(csv_output_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+
+            # row_type=motion：动作级平均指标
+            for motion_key in sorted(metrics_per_motion.keys(), key=self._motion_key_sort_for_mpjpe):
+                m = metrics_per_motion[motion_key]
+                writer.writerow(
+                    {
+                        "row_type": "motion",
+                        "dataset_path": dataset_path,
+                        "motion_key": motion_key,
+                        "env_id": m["env_id"],
+                        "num_steps": m["num_steps"],
+                        "E_g_mpjpe_mm": m["E_g_mpjpe_mm"],
+                        "E_mpjpe_mm": m["E_mpjpe_mm"],
+                        "E_acc_mm_per_frame2": m["E_acc_mm_per_frame2"],
+                        "E_vel_mm_per_frame": m["E_vel_mm_per_frame"],
+                        "num_motions": "",
+                    }
+                )
+
+            # row_type=overall：全数据集加权平均
+            writer.writerow(
+                {
+                    "row_type": "overall",
+                    "dataset_path": dataset_path,
+                    "motion_key": "OVERALL",
+                    "env_id": "",
+                    "num_steps": overall_metrics["num_steps"],
+                    "E_g_mpjpe_mm": overall_metrics["E_g_mpjpe_mm"],
+                    "E_mpjpe_mm": overall_metrics["E_mpjpe_mm"],
+                    "E_acc_mm_per_frame2": overall_metrics["E_acc_mm_per_frame2"],
+                    "E_vel_mm_per_frame": overall_metrics["E_vel_mm_per_frame"],
+                    "num_motions": overall_metrics["num_motions"],
+                }
+            )
+
+    def _save_mpjpe_step_metrics_to_csv(self, step_csv_output_path, step_metrics_rows):
+        """【函数作用】导出逐步 CSV：每一步的原始误差值，便于画误差时间曲线。"""
+        fieldnames = [
+            "dataset_path",
+            "motion_key",
+            "env_id",
+            "step_index",
+            "source_frame",
+            "target_frame",
+            "E_g_mpjpe_mm",
+            "E_mpjpe_mm",
+            "E_vel_mm_per_frame",
+            "E_acc_mm_per_frame2",
+        ]
+
+        with open(step_csv_output_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in step_metrics_rows:
+                writer.writerow(row)
+
+    def _resolve_mpjpe_dataset_path(self, pkl_path):
+        """【函数作用】解析并校验离线 pkl 数据路径；支持相对路径与配置兜底字段。"""
+        if pkl_path is None:
+            if hasattr(self.config, "mpjpe_eval_pkl_path"):
+                pkl_path = self.config.mpjpe_eval_pkl_path
+            elif hasattr(self.config, "eval_pkl_path"):
+                pkl_path = self.config.eval_pkl_path
+
+        # 兜底：若算法配置未提供路径，尝试使用环境当前动作文件。
+        # 这样在 eval_agent.py 未显式传参时也可跑通，不会直接抛出缺参错误。
+        if pkl_path is None:
+            try:
+                if hasattr(self.env.config, "robot") and hasattr(self.env.config.robot, "motion"):
+                    if hasattr(self.env.config.robot.motion, "motion_file"):
+                        pkl_path = self.env.config.robot.motion.motion_file
+                        logger.warning(
+                            "mpjpe_eval_pkl_path not provided, fallback to env motion_file: "
+                            f"{pkl_path}"
+                        )
+            except Exception:
+                pkl_path = None
+
+        if pkl_path is None:
+            raise ValueError(
+                "pkl_path is required. Pass it to evaluate_policy_for_mpjpe or set config.mpjpe_eval_pkl_path. "
+                "Example: +mpjpe_eval_pkl_path=logs/.../motions/your_dataset.pkl"
+            )
+
+        path = Path(str(pkl_path)).expanduser()
+        if not path.is_absolute():
+            path = (Path.cwd() / path).resolve()
+        if not path.exists():
+            raise FileNotFoundError(f"MPJPE dataset not found: {path}")
+        return str(path)
+
+    def _select_motion_keys_for_mpjpe(self, dataset_dict, motion_keys):
+        """【函数作用】筛选待评估动作键；支持全量和白名单两种模式。"""
+        if motion_keys is None:
+            return list(dataset_dict.keys())
+
+        if isinstance(motion_keys, str):
+            motion_keys = [motion_keys]
+
+        selected = [k for k in motion_keys if k in dataset_dict]
+        missing = [k for k in motion_keys if k not in dataset_dict]
+        if len(missing) > 0:
+            logger.warning(f"These motion keys are not in dataset and will be ignored: {missing}")
+        if len(selected) == 0:
+            raise ValueError("No valid motion_keys found in dataset.")
+        return selected
+
+    def _select_env_id_for_mpjpe(self, motion_key, fallback_env_id):
+        """【函数作用】从 motion key 末尾数字推断 env_id；失败时使用 fallback。"""
+        fallback = int(max(0, min(int(fallback_env_id), self.env.num_envs - 1)))
+        matched = re.search(r"(\d+)$", motion_key)
+        if matched is None:
+            return fallback
+        idx = int(matched.group(1))
+        if 0 <= idx < self.env.num_envs:
+            return idx
+        return fallback
+
+    def _infer_motion_dt_for_mpjpe(self, motion_data):
+        """【函数作用】推断时间步长 dt，优先使用 fps，其次使用环境 dt。"""
+        fps = float(motion_data.get("fps", 0.0))
+        if fps > 0.0:
+            return 1.0 / fps
+        if hasattr(self.env, "dt") and self.env.dt > 0:
+            return float(self.env.dt)
+        return 0.02
+
+    def _build_gt_body_positions_for_mpjpe(self, motion_data):
+        """【函数作用】用 pose_aa + root_trans_offset 做 FK，构建 GT 的刚体位置序列。"""
+        if not hasattr(self.env, "_motion_lib") or self.env._motion_lib is None:
+            raise RuntimeError("env._motion_lib is required to compute GT body positions from pose_aa.")
+        if "pose_aa" not in motion_data or "root_trans_offset" not in motion_data:
+            raise ValueError("motion_data must contain pose_aa and root_trans_offset.")
+
+        # 关键修复：mesh_parsers 在 MotionLibRobot 中默认以 CPU 初始化。
+        # 若这里强行喂 CUDA 张量，会在 FK 内部与 CPU 常量矩阵相乘时报 device mismatch。
+        parser = self.env._motion_lib.mesh_parsers
+        parser_device = torch.device("cpu")
+        if hasattr(parser, "_local_rotation_mat") and torch.is_tensor(parser._local_rotation_mat):
+            parser_device = parser._local_rotation_mat.device
+
+        pose_aa = torch.as_tensor(motion_data["pose_aa"], dtype=torch.float, device=parser_device)
+        root_trans = torch.as_tensor(motion_data["root_trans_offset"], dtype=torch.float, device=parser_device)
+        dt = self._infer_motion_dt_for_mpjpe(motion_data)
+
+        fk_res = parser.fk_batch(
+            pose_aa.unsqueeze(0),
+            root_trans.unsqueeze(0),
+            convert_to_mat=True,
+            return_full=False,
+            dt=dt,
+        )
+
+        if hasattr(fk_res, "global_translation_extend"):
+            return fk_res.global_translation_extend.squeeze(0).to(self.device)
+        return fk_res.global_translation.squeeze(0).to(self.device)
+
+    def _fit_vector_dim_for_mpjpe(self, vec, target_dim):
+        """【函数作用】把输入向量裁剪或零填充到 target_dim，避免维度不一致。"""
+        vec = vec.flatten()
+        if vec.shape[0] == target_dim:
+            return vec
+        if vec.shape[0] > target_dim:
+            return vec[:target_dim]
+        out = torch.zeros(target_dim, dtype=vec.dtype, device=vec.device)
+        out[:vec.shape[0]] = vec
+        return out
+
+    def _set_env_state_for_mpjpe(self, env_id, root_pos_t, root_rot_t, dof_pos_t, dof_vel_t=None, root_lin_vel_t=None, root_ang_vel_t=None):
+        """
+        【函数作用】把第 t 帧状态回灌到指定 env。
+        【关键点】
+        - root_state 13 维: [pos(3), quat(4), lin_vel(3), ang_vel(3)]
+        - dof_pos/dof_vel 按当前机器人自由度自动适配维度
+        """
+        env_ids = torch.tensor([env_id], dtype=torch.long, device=self.device)
+
+        # 根状态（13 维）
+        root_state = self.env.simulator.robot_root_states[env_id].clone()
+        root_state[0:3] = self._fit_vector_dim_for_mpjpe(root_pos_t, 3)
+        root_state[3:7] = self._fit_vector_dim_for_mpjpe(root_rot_t, 4)
+        if root_lin_vel_t is not None:
+            root_state[7:10] = self._fit_vector_dim_for_mpjpe(root_lin_vel_t, 3)
+        else:
+            root_state[7:10] = 0.0
+        if root_ang_vel_t is not None:
+            root_state[10:13] = self._fit_vector_dim_for_mpjpe(root_ang_vel_t, 3)
+        else:
+            root_state[10:13] = 0.0
+        self.env.simulator.robot_root_states[env_id] = root_state
+
+        # 关节状态（按当前 DOF 维度自动裁剪/补零）
+        target_dof_dim = self.env.simulator.dof_pos.shape[1]
+        self.env.simulator.dof_pos[env_id] = self._fit_vector_dim_for_mpjpe(dof_pos_t, target_dof_dim)
+        if dof_vel_t is not None:
+            self.env.simulator.dof_vel[env_id] = self._fit_vector_dim_for_mpjpe(dof_vel_t, target_dof_dim)
+        else:
+            self.env.simulator.dof_vel[env_id] = 0.0
+
+        # 把写回后的张量同步进仿真器并刷新
+        self.env.simulator.set_actor_root_state_tensor(env_ids, self.env.simulator.all_root_states)
+        self.env.simulator.set_dof_state_tensor(env_ids, self.env.simulator.dof_state)
+        self.env._refresh_sim_tensors()
+
+    def _get_sim_body_positions_for_mpjpe(self, env_id):
+        """【函数作用】读取仿真刚体位置；若有扩展点则拼接扩展点世界坐标后返回。"""
+        body_pos = self.env.simulator._rigid_body_pos[env_id]
+
+        has_extend = (
+            hasattr(self.env, "extend_body_parent_ids")
+            and hasattr(self.env, "extend_body_pos_in_parent")
+            and hasattr(self.env, "extend_body_rot_in_parent_xyzw")
+        )
+        if not has_extend:
+            return body_pos
+
+        # 扩展点位置 = 父刚体位置 + (父旋转 * 扩展局部偏移)
+        parent_ids = self.env.extend_body_parent_ids
+        parent_rot = self.env.simulator._rigid_body_rot[env_id, parent_ids]
+        extend_pos_parent = self.env.extend_body_pos_in_parent[env_id]
+        extend_rot_parent = self.env.extend_body_rot_in_parent_xyzw[env_id]
+
+        rotated_pos_in_parent = my_quat_rotate(parent_rot.reshape(-1, 4), extend_pos_parent.reshape(-1, 3))
+        extend_curr_pos = my_quat_rotate(extend_rot_parent.reshape(-1, 4), rotated_pos_in_parent).view(-1, 3)
+        extend_curr_pos = extend_curr_pos + self.env.simulator._rigid_body_pos[env_id, parent_ids]
+
+        return torch.cat([body_pos, extend_curr_pos], dim=0)
+
+    def _pre_eval_env_step_for_mpjpe(self, actor_state: dict):
+        """【函数作用】MPJPE 评估模式下的单步预处理入口（预留扩展钩子）。"""
+        return actor_state
+
+    def env_step_for_mpjpe(self, actor_state):
+        """【函数作用】MPJPE 评估专用单步推进，不触发环境内部 reset 流程。"""
+        # 只做一步物理推进，避免进入标准 _post_physics_step 内的 reset/reward 逻辑。
+        self.env._pre_physics_step(actor_state["actions"])
+        self.env._physics_step()
+        self.env._refresh_sim_tensors()
+
+        dones = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
+        actor_state.update({"obs": None, "rewards": None, "dones": dones, "extras": {}})
+        return actor_state
+
+    def _post_eval_env_step_for_mpjpe(self, actor_state):
+        """【函数作用】MPJPE 评估模式下的单步后处理入口（预留扩展钩子）。"""
+        return actor_state
+
     # @torch.no_grad()
     # def collect_delta_a_sim_data(self, num_collect_steps=1000, save_dir="logs_collect_data/delta_a_sim2sim_data/gym2gen"):
     #         """
@@ -1121,7 +1738,7 @@ class PPO(BaseAlgo):
         """【函数作用】实例化评估所需的 Callback。 【被谁调用】evaluate_policy."""
         if self.config.eval_callbacks is not None:
             for cb in self.config.eval_callbacks:
-                self.eval_callbacks.appendset_actor_root_state_tensor(instantiate(self.config.eval_callbacks[cb], training_loop=self))
+                self.eval_callbacks.append(instantiate(self.config.eval_callbacks[cb], training_loop=self))
 
     def _pre_evaluate_policy(self, reset_env=True):
         """【函数作用】考试前网络和环境的模式切换。 【被谁调用】evaluate_policy."""

@@ -136,8 +136,8 @@ def main(cfg: DictConfig):
     env.reset_all()
 
     motion_data = joblib.load(motion_file)
-    key = _pick_motion_key(motion_data, motion_key, motion_index)
-    motion = motion_data[key]
+    key = _pick_motion_key(motion_data, motion_key, motion_index)#key是motionx。也就是第x个动作的键。
+    motion = motion_data[key]#第i个动作的数据，是一个字典，包含了根位置、根旋转、关节位置等信息。
 
     root_trans = np.asarray(motion["root_trans_offset"], dtype=np.float32)
     dof = np.asarray(motion["dof"], dtype=np.float32)

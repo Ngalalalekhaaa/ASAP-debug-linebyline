@@ -50,45 +50,47 @@ def view_pkl_contents(file_path, num_rows=5):
             for attr_key, attr_val in motion_data.items():
                 print(f"🔹 属性名 (Key): '{attr_key}'")
                 
+                # if attr_key == "dof":
                 # 如果是 Numpy 数组
-                if isinstance(attr_val, np.ndarray):
-                    print(f"   - 格式 : Numpy Array")
-                    print(f"   - 形状 : {attr_val.shape}")
-                    print(f"   - 类型 : {attr_val.dtype}")
-                    
-                    if attr_val.ndim > 0:
-                        preview = attr_val[:num_rows]
-                    else:
-                        preview = attr_val
+                if True:
+                    if isinstance(attr_val, np.ndarray):
+                        print(f"   - 格式 : Numpy Array")
+                        print(f"   - 形状 : {attr_val.shape}")
+                        print(f"   - 类型 : {attr_val.dtype}")
                         
-                    # 临时设置 numpy 打印选项
-                    with np.printoptions(threshold=np.inf, linewidth=150, suppress=True):
+                        if attr_val.ndim > 0:
+                            preview = attr_val[:num_rows]
+                        else:
+                            preview = attr_val
+                            
+                        # 临时设置 numpy 打印选项
+                        with np.printoptions(threshold=np.inf, linewidth=150, suppress=True):
+                            print(f"   - 数据预览 (前 {num_rows} 行):\n{preview}")
+
+                    # 如果是 PyTorch 张量
+                    elif torch.is_tensor(attr_val):
+                        print(f"   - 格式 : PyTorch Tensor")
+                        print(f"   - 形状 : {list(attr_val.shape)}")
+                        print(f"   - 类型 : {attr_val.dtype}")
+                        
+                        if attr_val.ndim > 0:
+                            preview = attr_val[:num_rows]
+                        else:
+                            preview = attr_val
                         print(f"   - 数据预览 (前 {num_rows} 行):\n{preview}")
 
-                # 如果是 PyTorch 张量
-                elif torch.is_tensor(attr_val):
-                    print(f"   - 格式 : PyTorch Tensor")
-                    print(f"   - 形状 : {list(attr_val.shape)}")
-                    print(f"   - 类型 : {attr_val.dtype}")
-                    
-                    if attr_val.ndim > 0:
-                        preview = attr_val[:num_rows]
+                    # 如果是列表
+                    elif isinstance(attr_val, list):
+                        print(f"   - 格式 : List")
+                        print(f"   - 长度 : {len(attr_val)}")
+                        print(f"   - 数据预览 (前 {num_rows} 项): {attr_val[:num_rows]}")
+
+                    # 如果是标量 (如 int, float, bool)
                     else:
-                        preview = attr_val
-                    print(f"   - 数据预览 (前 {num_rows} 行):\n{preview}")
-
-                # 如果是列表
-                elif isinstance(attr_val, list):
-                    print(f"   - 格式 : List")
-                    print(f"   - 长度 : {len(attr_val)}")
-                    print(f"   - 数据预览 (前 {num_rows} 项): {attr_val[:num_rows]}")
-
-                # 如果是标量 (如 int, float, bool)
-                else:
-                    print(f"   - 格式 : {type(attr_val).__name__}")
-                    print(f"   - 数据值 : {attr_val}")
-                    
-                print("-" * 60)
+                        print(f"   - 格式 : {type(attr_val).__name__}")
+                        print(f"   - 数据值 : {attr_val}")
+                        
+                    print("-" * 60)
 
     except Exception as e:
         print(f"❌ 读取文件时发生错误: {e}")
@@ -98,10 +100,10 @@ def view_pkl_contents(file_path, num_rows=5):
 # ==========================================
 if __name__ == "__main__":
     # 1. 指定你的 .pkl 文件路径
-    pkl_file_path = "/home/luckysir/ASAP/logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum8_20260413155020.pkl"
+    pkl_file_path = "logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum2_20260413154610.pkl"
     
     # 2. 调整你想查看的行数 (时间步数)
     # 把这里的 5 改成你想看的数字，比如 20, 50, 100
-    display_rows = 3 
+    display_rows = 2 
     
     view_pkl_contents(pkl_file_path, num_rows=display_rows)

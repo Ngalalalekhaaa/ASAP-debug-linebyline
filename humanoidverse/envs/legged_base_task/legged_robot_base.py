@@ -324,7 +324,7 @@ class LeggedRobotBase(BaseTask):
         # 记录有多少动作顶到了极限值（这可以监控网络的学习是否变得病态）
         self.log_dict["action_clip_frac"] = (
                 self.actions.abs() == clip_action_limit
-            ).sum() / self.actions.numel()
+            ).sum() / self.actions.numel()#torch.numel()返回张量的总元素个数（2*3*4=24）
 
         # 处理延迟控制（极其关键的 Sim2Real 技巧）
         if self.config.domain_rand.randomize_ctrl_delay:
@@ -395,7 +395,7 @@ class LeggedRobotBase(BaseTask):
             self.obs_buf_dict[obs_key] = torch.clip(obs_val, -clip_obs, clip_obs) # 同样限制观测值的极值防爆
 
         for key in self.history_handler.history.keys():
-            self.history_handler.add(key, self.hist_obs_dict[key]) # 将当前状态hist_obs_dict推入历史序列，供未来使用
+            self.history_handler.add(key, self.hist_obs_dict[key]) # 将当前状态hist_obs_dict(加噪且放缩过的这一期的观测值)推入历史序列，供未来使用
 
         self.extras["to_log"] = self.log_dict
         if self.viewer:
@@ -695,9 +695,9 @@ class LeggedRobotBase(BaseTask):
         """
         self.rew_buf[:] = 0.
         for i in range(len(self.reward_functions)):
-            name = self.reward_names[i]
+            name = self.reward_names[i]#reward_names[i]和reward_functions[i]是一一对应的，都是按照配置中reward_scales里非零的奖励项顺序排列的。reward_names[i]是字符串名字，reward_functions[i]是函数指针。
             # 计算特定的单项奖励，并乘以你在配置文件里设定的该项权重（Scale）
-            rew = self.reward_functions[i]() * self.reward_scales[name]
+            rew = self.reward_functions[i]() * self.reward_scales[name]#名字，函数，奖励权重这3个都是一一对应的（基于reward_scales的顺序构建的）
             try:
                 assert rew.shape[0] == self.num_envs
             except:
@@ -707,7 +707,7 @@ class LeggedRobotBase(BaseTask):
                 if self.config.rewards.reward_penalty_curriculum:
                     rew *= self.reward_penalty_scale
             self.rew_buf += rew # 累加到最终的总分上
-            self.episode_sums[name] += rew # 累加到统计字典里，只为看 Log
+            self.episode_sums[name] += rew # 累加到统计字典里，只为看 Log。#episode_sums是一个字典，键是奖励项的名字，值是一个长度为环境数量的张量，记录了每个环境在这一回合里这个奖励项的累计得分。它会在 reset 的时候被清零。
             
         # 根据配置，截断负数惩罚，很多论文认为负奖励会让机器人更倾向于消极避世（立刻摔倒来停止由于乱动带来的扣分）
         if self.config.rewards.only_positive_rewards:
@@ -752,17 +752,17 @@ class LeggedRobotBase(BaseTask):
             noise_extra_scale = 1.
         # print("noise_extra_scale", noise_extra_scale)
         # compute Algo observations
-        for obs_key, obs_config in self.config.obs.obs_dict.items():
+        for obs_key, obs_config in self.config.obs.obs_dict.items():#观测值总有2个：动作网络和价值网络。如果有闭环微调，还有闭环微调的观测值。
             self.obs_buf_dict_raw[obs_key] = dict()
             # 这是一个外部帮助函数，它会依据配置找到下面的 `_get_obs_xxx` 方法，调用后自动施加噪声。
             parse_observation(self, obs_config, self.obs_buf_dict_raw[obs_key], self.config.obs.obs_scales, self.config.obs.noise_scales, noise_extra_scale)
         
         # Compute history observations
         # 处理并抽取存好的历史状态队列
-        history_obs_list = self.history_handler.history.keys()
+        history_obs_list = self.history_handler.history.keys()#history_handler是一个HistoryHandler对象，.history是一个字典，每个键是各个观测维度，值以3维张量存储所有环境所有历史期数所有观测值维度的历史观测值。？？为什么是字典？
         parse_observation(self, history_obs_list, self.hist_obs_dict, self.config.obs.obs_scales, self.config.obs.noise_scales, noise_extra_scale)
-        
-        self._post_config_observation_callback()
+        #上一行得到的hist_obs_dict只是当前这一期的观测值，加过噪声且放缩过后的
+        self._post_config_observation_callback()#把self.obs_buf_dict_raw按字母顺序拼接成self.obs_buf_dict字典，键为网络名称，值为该网络各个观测值按照字母排序的值构成的一维张量供全连接网络使用。
 
     """
     【函数作用】：把分散的特征按照字母顺序（保证统一）拼接成一个巨大的一维张量，供全连接网络使用。

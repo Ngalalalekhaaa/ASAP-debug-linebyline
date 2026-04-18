@@ -69,7 +69,7 @@ def pre_process_config(config) -> None:
     assert set(config.env.config.obs.noise_scales.keys()) == set(config.env.config.obs.obs_scales.keys())
 
     # convert obs_dims to list of dicts
-    # 扁平化处理：将包含多个字典的列表 config.env.config.obs.obs_dims 转换成一个大字典
+    # 扁平化处理：将包含多个字典（.yaml文件中的键值对传入时会自动转换成字典，所以可以用.items()方法）的列表 config.env.config.obs.obs_dims 转换成一个大字典
     each_dict_obs_dims = {k: v for d in config.env.config.obs.obs_dims for k, v in d.items()}
     config.env.config.obs.obs_dims = each_dict_obs_dims # 更新配置中的观测维度字典
     logger.info(f"obs_dims: {each_dict_obs_dims}") # 打印日志
@@ -138,7 +138,7 @@ def parse_observation(cls: Any,
     """
 
     # 遍历需要获取的观测键名列表（如 ["base_lin_vel", "dof_pos", ...]）
-    for obs_key in key_list:
+    for obs_key in key_list:#obs_key是观测键名，如"base_lin_vel"。
         # 如果键名以 "_raw" 结尾，代表我们需要获取未经噪声污染的“干净/原始”数据
         if obs_key.endswith("_raw"):
             obs_key = obs_key[:-4] # 去掉 "_raw" 后缀，得到真正的观测名
@@ -153,7 +153,7 @@ def parse_observation(cls: Any,
         # 核心黑魔法：getattr 动态调用函数。
         # 假设 obs_key 是 "dof_pos"，这里等价于调用了 cls._get_obs_dof_pos().clone()
         # 它要求机器人类（cls）中必须实现这些特定的数据获取方法。 clone() 防止原数据被修改。
-        actor_obs = getattr(cls, f"_get_obs_{obs_key}")().clone()
+        actor_obs = getattr(cls, f"_get_obs_{obs_key}")().clone()#也不一定是actor_obs？。
         
         # 获取该观测值的缩放系数（归一化系数，将物理量缩放到类似 [-1, 1] 的区间以利于神经网络训练）
         obs_scale = obs_scales[obs_key]
@@ -165,7 +165,7 @@ def parse_observation(cls: Any,
         # * 2. - 1. 将其变换为 -1 到 1 之间的均匀分布噪声。
         # 再乘以 obs_noise 得到实际添加的物理噪声量。
         # 公式解释： (原始观测 + 均匀噪声) * 缩放系数。 注意：这里是加了噪声后再乘缩放系数！
-        buf_dict[obs_key] = (actor_obs + (torch.rand_like(actor_obs)* 2. - 1.) * obs_noise) * obs_scale
+        buf_dict[obs_key] = (actor_obs + (torch.rand_like(actor_obs)* 2. - 1.) * obs_noise) * obs_scale#先加噪再乘放缩系数
 
 """
 【函数说明】：parse_observation

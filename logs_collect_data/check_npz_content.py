@@ -75,24 +75,27 @@ if __name__ == "__main__":
     view_npz_contents(sample_file, print_preview=True, num_steps=1)
     
     
+HYDRA_FULL_ERROR=1 \
 nohup python humanoidverse/train_agent.py \
-  +simulator=isaacgym \
-  +exp=train_delta_a_open_loop \
-  +domain_rand=NO_domain_rand \
-  +rewards=motion_tracking/delta_a/reward_delta_a_openloop \
-  +robot=g1/g1_29dof_anneal_23dof \
-  +terrain=terrain_locomotion_plane \
-  +obs=delta_a/open_loop \
-  num_envs=4096 \
-  project_name=DeltaA_Training \
-  experiment_name=openloopDeltaA_training \
-  robot.motion.motion_file="/home/luckysir/ASAP/logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum4_20260413154759.pkl" \
-  env.config.max_episode_length_s=1.0 \
-  rewards.reward_scales.penalty_minimal_action_norm=-0.1 \
-  +device=cuda:0 \
-  env.config.resample_motion_when_training=True \
-  env.config.resample_time_interval_s=10000 \
-  > openloopDeltaA_timeoutonly_test_mtnum4_20260413154759_cuda0.log 2>&1 &
++simulator=isaacgym \
++exp=train_delta_a_open_loop \
++domain_rand=NO_domain_rand \
++rewards=motion_tracking/delta_a/reward_delta_a_openloop \
++robot=g1/g1_29dof_anneal_23dof \
++terrain=terrain_locomotion_plane \
++obs=delta_a/open_loop \
+num_envs=4096 \
+project_name=DeltaA_Training \
+robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum128_20260413184401.pkl" \
+env.config.max_episode_length_s=1.0 \
+rewards.reward_scales.penalty_minimal_action_norm=-0.5 \
++device=cuda:1 \
+env.config.resample_motion_when_training=True \
+env.config.resample_time_interval_s=10000 \
++checkpoint=logs/DeltaA_Training/20260413_204909-openloopDeltaA_training-delta_a-g1_29dof_anneal_23dof/model_17300.pt \
+experiment_name=after_20260413_204909_17300pt_penaltyMinimalAction0p5 \
+log_task_name=check_stop_error_num3 \
+> openloopDeltaA_timeoutonly_mtnum128_20260413184401_cuda1_check_stop_error_num3.log 2>&1 &
 
 
 # HYDRA_FULL_ERROR=1 \
@@ -122,10 +125,12 @@ nohup python humanoidverse/train_agent.py \
 
 HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
 +checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt \
-+env.config.save_motion=True \
-+env.config.save_note=timeoutonly_mtnum1 \
-+env.config.eval_timestamp=$(date +%Y%m%d_%H%M%S) \
 +simulator=genesis
+#+opt=eval_analysis_plot_motion_tracking_openloop
+# +env.config.save_motion=True \
+# +env.config.save_note=timeoutonly_mtnum1 \
+# +env.config.eval_timestamp=$(date +%Y%m%d_%H%M%S) \
+
 
 
 python logs_collect_data/replay_motion_in_sim.py \
@@ -136,7 +141,17 @@ python logs_collect_data/replay_motion_in_sim.py \
 +robot=g1/g1_29dof_anneal_23dof \
 +terrain=terrain_locomotion_plane \
 +obs=motion_tracking/deepmimic_a2c_nolinvel_LARGEnoise_history \
-+visualize_motion_file="/home/luckysir/ASAP/logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum8_20260413155020.pkl" \
++visualize_motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum4_20260413154759.pkl" \
 +replay_num_envs=1 \
 +recenter_nonzero_to_origin=True \
-+motion_key=motion6
++motion_key=motion0
+
+
++experiment_name=
++log_task_name=
+
+
+HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
++mpjpe_eval_pkl_path=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum2_20260413154610.pkl \
++mpjpe_eval_csv_path=logs_eval/TEST/mpjpe_summary.csv \
++mpjpe_eval_step_csv_path=logs_eval/TEST/mpjpe_steps.csv

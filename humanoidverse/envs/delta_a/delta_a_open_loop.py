@@ -192,7 +192,7 @@ class DeltaA_OpenLoop(LeggedRobotMotionTracking):
         """
         # 预测下一帧的时间 (当前帧经过时长 + dt + 各自片段的随机起始时长)
         motion_times = (self.episode_length_buf + 1) * self.dt + self.motion_start_times
-        # 从底层的动作库(MotionLib)中取出指定环境在指定时间该下发的电机动作
+        # 从底层的动作库(MotionLib)中取出指定环境在指定时间该下发的电机动作。保存的电机动作是否经过乘以比例因子转化为弧度了？
         motion_action = self._motion_lib.get_motion_actions(self.motion_ids, motion_times)
 
         return motion_action

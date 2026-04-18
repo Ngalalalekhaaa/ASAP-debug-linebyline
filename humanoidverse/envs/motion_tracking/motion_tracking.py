@@ -372,7 +372,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             self.dif_global_body_pos = ref_body_pos_extend - self._rigid_body_pos_extend # 空间坐标误差
             self.dif_global_body_rot = quat_mul(ref_body_rot_extend, quat_conjugate(self._rigid_body_rot_extend, w_last=True), w_last=True) # 旋转误差（四元数差就是乘共轭）
             self.dif_global_body_vel = ref_body_vel_extend - self._rigid_body_vel_extend # 线速度误差
-            self.dif_global_body_ang_vel = ref_body_ang_vel_extend - self._rigid_body_ang_vel_extend # 角速度误差
+            self.dif_global_body_ang_vel = ref_body_ang_vel_extend - self._rigid_body_ang_vel_extend # 刚体角速度误差
             self.dif_joint_angles = ref_joint_pos - self.simulator.dof_pos # 底层电机关节误差
             self.dif_joint_velocities = ref_joint_vel - self.simulator.dof_vel # 关节速度误差
 
@@ -442,10 +442,10 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         vr_3point_diff = self.dif_global_body_pos[:, self.motion_tracking_id, :]
         joint_pos_diff = self.dif_joint_angles
 
-        upper_body_diff_norm = upper_body_diff.norm(dim=-1).mean()
+        upper_body_diff_norm = upper_body_diff.norm(dim=-1).mean()#.mean()默认对所有元素求平均，结果是标量
         lower_body_diff_norm = lower_body_diff.norm(dim=-1).mean()
         vr_3point_diff_norm = vr_3point_diff.norm(dim=-1).mean()
-        joint_pos_diff_norm = joint_pos_diff.norm(dim=-1).mean()
+        joint_pos_diff_norm = joint_pos_diff.norm(dim=-1).mean()#各个环境中所有电机实际位置与参考位置的差值的 L2 范数的平均值。即：所有环境平均电机位置误差
 
         self.log_dict["upper_body_diff_norm"] = upper_body_diff_norm
         self.log_dict["lower_body_diff_norm"] = lower_body_diff_norm
@@ -1024,7 +1024,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
     
     def _reward_teleop_body_rotation_extend(self):
         """奖励：驱干姿态对齐"""
-        rotation_diff = quat_to_angle_axis(self.dif_global_body_rot)[0]
+        rotation_diff = quat_to_angle_axis(self.dif_global_body_rot)[0]#轴角表示法，1维弧度和3维旋转轴。将四元数旋转差 self.dif_global_body_rot 转换为旋转角度（angle），结果保存在 rotation_diff 里。本质上，rotation_diff 表示每个刚体的旋转误差有多大（弧度制）。
         diff_body_rot_dist = (rotation_diff**2).mean(dim=-1)
         r_body_rot = torch.exp(-diff_body_rot_dist / self.config.rewards.reward_tracking_sigma.teleop_body_rot)
         return r_body_rot

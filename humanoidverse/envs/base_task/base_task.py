@@ -162,7 +162,7 @@ class BaseTask():
     def reset_all(self):
         """ Reset all robots"""
         # 生成一个包含所有环境 ID 的张量 [0, 1, 2, ..., num_envs-1]
-        # 并调用底层的方法重置它们的状态（位置、速度等）。初始状态都是从配置文件中读取的，没有域随机化
+        # 并调用底层的方法重置它们的状态（位置、速度等）。初始状态都是从配置文件(并非，模仿学习中会新增或重写相关逻辑，改成从动作库抽取)中读取的，没有域随机化
         self.reset_envs_idx(torch.arange(self.num_envs, device=self.device))#这句对所有4096个环境进行重置
         
         # 将机器人的基座（Root）状态写入仿真器
