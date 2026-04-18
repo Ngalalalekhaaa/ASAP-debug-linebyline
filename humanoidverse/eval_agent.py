@@ -272,16 +272,17 @@ def main(override_config: OmegaConf):
     # ---------------- 8. 启动死循环，开始评估 ----------------
     # 进入仿真的主循环：不断收集环境观测值 -> 神经网络输出关节命令 -> 环境执行命令步进仿真
     
-    algo.evaluate_policy()
+    #algo.evaluate_policy()
     #algo.collect_delta_a_sim_data()
-    # algo.evaluate_policy_for_mpjpe(
-    #     pkl_path=config.get("mpjpe_eval_pkl_path", None),
-    #     motion_keys=config.get("mpjpe_eval_motion_keys", None),
-    #     max_steps=config.get("mpjpe_eval_max_steps", None),
-    #     fallback_env_id=config.get("mpjpe_eval_fallback_env_id", 0),
-    #     csv_path=config.get("mpjpe_eval_csv_path", None),
-    #     step_csv_path=config.get("mpjpe_eval_step_csv_path", None),
-    # )
+    algo.evaluate_policy_for_mpjpe(
+        pkl_path=config.get("mpjpe_eval_pkl_path", None),
+        motion_keys=config.get("mpjpe_eval_motion_keys", None),
+        max_steps=config.get("mpjpe_eval_max_steps", None),
+        fallback_env_id=config.get("mpjpe_eval_fallback_env_id", 0),
+        csv_path=config.get("mpjpe_eval_csv_path", None),
+        step_csv_path=config.get("mpjpe_eval_step_csv_path", None),
+        use_deltaa_compensation=config.get("mpjpe_eval_use_deltaa_compensation", True),
+    )
 
 # 标准 python 执行入口
 if __name__ == "__main__":

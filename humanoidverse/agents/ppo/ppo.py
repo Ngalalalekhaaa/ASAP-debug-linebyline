@@ -827,7 +827,7 @@ class PPO(BaseAlgo):
         self._post_evaluate_policy() # (实际上这里 while True 执行不到)
 
     @torch.no_grad()
-    def evaluate_policy_for_mpjpe(self, pkl_path=None, motion_keys=None, max_steps=None, fallback_env_id=0, csv_path=None, step_csv_path=None):
+    def evaluate_policy_for_mpjpe(self, pkl_path=None, motion_keys=None, max_steps=None, fallback_env_id=0, csv_path=None, step_csv_path=None, use_deltaa_compensation=True):
         """
         【函数作用】基于离线采集的 pkl 逐帧回灌状态和动作，计算仿真器与数据源环境的误差指标。
         【执行逻辑】
@@ -842,6 +842,7 @@ class PPO(BaseAlgo):
         - fallback_env_id: motion_key 不能映射 env_id 时使用的兜底 env。
         - csv_path: 汇总 CSV 输出路径（每个动作一行 + overall 一行）。
         - step_csv_path: 逐步 CSV 输出路径（每个时间步一行）。
+        - use_deltaa_compensation: 是否在每步将 delta-a 模型输出叠加到数据集动作上。
         【指标定义】
         - E_g-mpjpe: 全局身体位置误差 (mm)
         - E_mpjpe: 根节点对齐后的平均关节误差 (mm)
@@ -850,15 +851,27 @@ class PPO(BaseAlgo):
         """
         self._eval_mode()
         self.env.set_is_evaluating()
-        _ = self.env.reset_all()
+        _ = self.env.reset_all()#需要加，因为进入评估模式后，重置会得到固定初始状态。前面没有执行评估模式时，重置得到的初始状态是随机的，会导致结果每次不一样。但为什么？难道不应该加载的是已有数据，就算前面是随机的初始状态，加载了数据后也应该是一样的啊？但为什么不一样呢？
+
+        if isinstance(use_deltaa_compensation, str):
+            use_deltaa_compensation = use_deltaa_compensation.strip().lower() in ("1", "true", "yes", "y", "on")
+        else:
+            use_deltaa_compensation = bool(use_deltaa_compensation)
+
+        self.eval_policy = None
+        if use_deltaa_compensation:
+            self.eval_policy = self._get_inference_policy() # 提取纯净大脑模型（这个函数输入action_obs,输出动作均值）
+
+        logger.info(f"MPJPE delta-a compensation enabled: {use_deltaa_compensation}")
+
 
         # 1) 加载并筛选动作数据
-        dataset_path = self._resolve_mpjpe_dataset_path(pkl_path)
-        dataset_dict = joblib.load(dataset_path)
+        dataset_path = self._resolve_mpjpe_dataset_path(pkl_path)#motion文件的绝对路径
+        dataset_dict  = joblib.load(dataset_path)#motion的.pkl文件被加载成一个字典
         if not isinstance(dataset_dict, dict) or len(dataset_dict) == 0:
             raise ValueError(f"Invalid dataset in {dataset_path}. Expect non-empty dict.")
 
-        selected_keys = self._select_motion_keys_for_mpjpe(dataset_dict, motion_keys)
+        selected_keys = self._select_motion_keys_for_mpjpe(dataset_dict, motion_keys)#motion_keys为None，返回motion0,1,2,...的动作键名列表。
 
         # metrics_per_motion: 每个动作段的平均指标
         metrics_per_motion = {}
@@ -874,7 +887,7 @@ class PPO(BaseAlgo):
         step_metrics_rows = []
 
         for motion_key in selected_keys:
-            motion_data = dataset_dict[motion_key]
+            motion_data = dataset_dict[motion_key]#一个动作的各种记录数据字段组成的字典
             # 逐帧状态回灌至少需要这些字段
             required_keys = ["root_trans_offset", "root_rot", "dof", "action", "pose_aa"]
             missing = [k for k in required_keys if k not in motion_data]
@@ -883,8 +896,16 @@ class PPO(BaseAlgo):
                 continue
 
             # motion_key -> env_id 的映射（如 motion17 -> env 17）
-            env_id = self._select_env_id_for_mpjpe(motion_key, fallback_env_id)
+            env_id = self._select_env_id_for_mpjpe(motion_key, fallback_env_id)#开始20260208数据集配置num_env=1时，env_id始终为feedback_id，即：0
+            # 每条 motion 开始前清空该 env 的时序历史，避免上一条动作的历史观测污染当前评估。
+            reset_mask = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
+            reset_mask[env_id] = True
+            self.actor.reset(reset_mask)
+            self.critic.reset(reset_mask)
+            if hasattr(self.env, "history_handler") and self.env.history_handler is not None:
+                self.env.history_handler.reset(torch.tensor([env_id], dtype=torch.long, device=self.device))
 
+            #第0个环境也合理，因为第0个环境并不对应一定要在原点。如果根位置有偏移，就会出现在对应位置。如果修改数据集中的config.yaml，还是一个一个环境串行执行，因为逻辑就是串行执行
             # 目标轨迹状态与动作（来自离线采集）
             root_pos = torch.as_tensor(motion_data["root_trans_offset"], dtype=torch.float, device=self.device)
             root_rot = torch.as_tensor(motion_data["root_rot"], dtype=torch.float, device=self.device)
@@ -904,7 +925,7 @@ class PPO(BaseAlgo):
                 root_ang_vel = torch.as_tensor(motion_data["root_ang_vel"], dtype=torch.float, device=self.device)
 
             # 用 FK 从 pose_aa 构建 GT 的刚体位置（与仿真侧位姿做对比）
-            gt_body_pos = self._build_gt_body_positions_for_mpjpe(motion_data)
+            gt_body_pos = self._build_gt_body_positions_for_mpjpe(motion_data)#各个刚体位置
 
             # 多个字段长度可能不一致，统一截到最短帧数
             frame_count = min(
@@ -926,7 +947,7 @@ class PPO(BaseAlgo):
                 continue
 
             # 一次比较使用 (t -> t+1)，所以可评估步数是 frame_count - 1
-            steps = frame_count - 1
+            steps = frame_count - 1#steps是总帧数减1
             if max_steps is not None:
                 steps = min(steps, int(max_steps))
             if steps <= 0:
@@ -940,7 +961,7 @@ class PPO(BaseAlgo):
                 else:
                     fps = 50.0
             # 若 root_lin_vel 是 m/s，这里将其换算成 mm/frame 便于和指标单位一致
-            mm_per_frame_from_mps = 1000.0 / fps
+            mm_per_frame_from_mps = 1000.0 / fps#每帧多少毫米（基座线速度）
 
             # action_full: 环境级动作缓冲，仅把目标 env_id 那一行写成数据集动作
             action_full = torch.zeros(self.env.num_envs, self.num_act, device=self.device)
@@ -955,7 +976,7 @@ class PPO(BaseAlgo):
             gt_root_vel_seq = []
 
             for t in range(steps):
-                self._set_env_state_for_mpjpe(
+                self._set_env_state_for_mpjpe(#将根状态，关节状态同步到仿真环境中。
                     env_id=env_id,
                     root_pos_t=root_pos[t],
                     root_rot_t=root_rot[t],
@@ -967,6 +988,21 @@ class PPO(BaseAlgo):
 
                 action_full.zero_()
                 action_full[env_id] = self._fit_vector_dim_for_mpjpe(actions[t], self.num_act)
+
+                if use_deltaa_compensation:
+                    obs_for_deltaa_openloop, _, _, _ = self.env.get_observation_for_delta_a_openloop_for_mpjpe()
+                    deltaa_actor_obs = obs_for_deltaa_openloop["actor_obs"].to(self.device)
+                    deltaa_actions = self.eval_policy(deltaa_actor_obs).to(self.device)
+
+                    # 仅对当前评估 env 叠加补偿动作，避免污染其他并行环境。
+                    if deltaa_actions.dim() == 1:
+                        deltaa_action_env = deltaa_actions
+                    elif deltaa_actions.shape[0] > env_id:
+                        deltaa_action_env = deltaa_actions[env_id]
+                    else:
+                        deltaa_action_env = deltaa_actions[0]
+                    action_full[env_id] += self._fit_vector_dim_for_mpjpe(deltaa_action_env, self.num_act)
+
 
                 actor_state = {"step": t, "actions": action_full}
                 actor_state = self._pre_eval_env_step_for_mpjpe(actor_state)
@@ -981,10 +1017,10 @@ class PPO(BaseAlgo):
                 pred_next_body = pred_next_body[:valid_body_num]
                 gt_next_body = gt_next_body[:valid_body_num]
 
-                g_err = torch.norm(pred_next_body - gt_next_body, dim=-1).mean() * 1000.0
-                pred_rel = pred_next_body - pred_next_body[0:1]
-                gt_rel = gt_next_body - gt_next_body[0:1]
-                rel_err = torch.norm(pred_rel - gt_rel, dim=-1).mean() * 1000.0
+                g_err = torch.norm(pred_next_body - gt_next_body, dim=-1).mean() * 1000.0#所有刚体质心的平均距离
+                pred_rel = pred_next_body - pred_next_body[0:1]#每个刚体相对于根节点的相对位置
+                gt_rel = gt_next_body - gt_next_body[0:1]#收集的数据中每个刚体相对于根节点的相对位置
+                rel_err = torch.norm(pred_rel - gt_rel, dim=-1).mean() * 1000.0#数据集和仿真，相对于根节点位置的平均距离
 
                 g_mpjpe_steps.append(float(g_err.item()))
                 mpjpe_steps.append(float(rel_err.item()))
@@ -1135,6 +1171,7 @@ class PPO(BaseAlgo):
             "dataset_path": dataset_path,
             "csv_path": csv_output_path,
             "step_csv_path": step_csv_output_path,
+            "use_deltaa_compensation": use_deltaa_compensation,
             "metrics_per_motion": metrics_per_motion,
             "overall": overall_metrics,
         }
@@ -1274,17 +1311,17 @@ class PPO(BaseAlgo):
                 "Example: +mpjpe_eval_pkl_path=logs/.../motions/your_dataset.pkl"
             )
 
-        path = Path(str(pkl_path)).expanduser()
+        path = Path(str(pkl_path)).expanduser()#将路径中的 ~ 替换成用户主目录
         if not path.is_absolute():
             path = (Path.cwd() / path).resolve()
         if not path.exists():
             raise FileNotFoundError(f"MPJPE dataset not found: {path}")
-        return str(path)
+        return str(path)#返回motion文件的绝对路径
 
     def _select_motion_keys_for_mpjpe(self, dataset_dict, motion_keys):
         """【函数作用】筛选待评估动作键；支持全量和白名单两种模式。"""
-        if motion_keys is None:
-            return list(dataset_dict.keys())
+        if motion_keys is None:#直接bingo了，不筛选了，评估全部motion
+            return list(dataset_dict.keys())#返回motion0,1,2,...的列表
 
         if isinstance(motion_keys, str):
             motion_keys = [motion_keys]
@@ -1300,7 +1337,7 @@ class PPO(BaseAlgo):
     def _select_env_id_for_mpjpe(self, motion_key, fallback_env_id):
         """【函数作用】从 motion key 末尾数字推断 env_id；失败时使用 fallback。"""
         fallback = int(max(0, min(int(fallback_env_id), self.env.num_envs - 1)))
-        matched = re.search(r"(\d+)$", motion_key)
+        matched = re.search(r"(\d+)$", motion_key)#在字符串 motion_key 中从右向左查找末尾连续的数字，并捕获这些数字。
         if matched is None:
             return fallback
         idx = int(matched.group(1))
@@ -1368,7 +1405,7 @@ class PPO(BaseAlgo):
         env_ids = torch.tensor([env_id], dtype=torch.long, device=self.device)
 
         # 根状态（13 维）
-        root_state = self.env.simulator.robot_root_states[env_id].clone()
+        root_state = self.env.simulator.robot_root_states[env_id].clone()#第 env_id 个环境的根状态，shape (13,)
         root_state[0:3] = self._fit_vector_dim_for_mpjpe(root_pos_t, 3)
         root_state[3:7] = self._fit_vector_dim_for_mpjpe(root_rot_t, 4)
         if root_lin_vel_t is not None:
@@ -1379,20 +1416,20 @@ class PPO(BaseAlgo):
             root_state[10:13] = self._fit_vector_dim_for_mpjpe(root_ang_vel_t, 3)
         else:
             root_state[10:13] = 0.0
-        self.env.simulator.robot_root_states[env_id] = root_state
+        self.env.simulator.robot_root_states[env_id] = root_state#robot_root_states是all_root_states重新view后切片的部分，二者共享内存，改变其中一个会影响另一个
 
         # 关节状态（按当前 DOF 维度自动裁剪/补零）
-        target_dof_dim = self.env.simulator.dof_pos.shape[1]
+        target_dof_dim = self.env.simulator.dof_pos.shape[1]#dof_pos和dof_vel都是dof_state重新view后切片的部分，shape (num_envs,-1 ,2),共享内存
         self.env.simulator.dof_pos[env_id] = self._fit_vector_dim_for_mpjpe(dof_pos_t, target_dof_dim)
         if dof_vel_t is not None:
             self.env.simulator.dof_vel[env_id] = self._fit_vector_dim_for_mpjpe(dof_vel_t, target_dof_dim)
         else:
             self.env.simulator.dof_vel[env_id] = 0.0
 
-        # 把写回后的张量同步进仿真器并刷新
-        self.env.simulator.set_actor_root_state_tensor(env_ids, self.env.simulator.all_root_states)
-        self.env.simulator.set_dof_state_tensor(env_ids, self.env.simulator.dof_state)
-        self.env._refresh_sim_tensors()
+        # 把写回后的张量同步进仿真器并刷新。过程是：从仿真器中拿到各种状态的指针，然后解析指针和张量对应起来，设置和读取都是对这个张量进行操作
+        self.env.simulator.set_actor_root_state_tensor(env_ids, self.env.simulator.all_root_states)#写入修改仿真器中指定环境编号的根状态值
+        self.env.simulator.set_dof_state_tensor(env_ids, self.env.simulator.dof_state)#写入修改仿真器中指定环境编号的关节状态值
+        self.env._refresh_sim_tensors()#读取仿真器中所有环境的根状态和关节状态
 
     def _get_sim_body_positions_for_mpjpe(self, env_id):
         """【函数作用】读取仿真刚体位置；若有扩展点则拼接扩展点世界坐标后返回。"""
@@ -1427,7 +1464,7 @@ class PPO(BaseAlgo):
         # 只做一步物理推进，避免进入标准 _post_physics_step 内的 reset/reward 逻辑。
         self.env._pre_physics_step(actor_state["actions"])
         self.env._physics_step()
-        self.env._refresh_sim_tensors()
+        self.env._refresh_sim_tensors()#从仿真器中刷新最新的根状态、关节状态、刚体位置等张量数据到环境属性中，确保后续读取到的是最新的仿真状态。
 
         dones = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
         actor_state.update({"obs": None, "rewards": None, "dones": dones, "extras": {}})

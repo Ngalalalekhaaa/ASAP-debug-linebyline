@@ -404,6 +404,60 @@ class LeggedRobotBase(BaseTask):
             if self.debug_viz:
                 self._draw_debug_vis()
     
+    
+        """
+    【函数作用】：从_post_physics_step修改而来，获取用于 MPJPE 评估时delta-a模型的观测数据
+    【被谁调用】：evaluate_policy_for_mpjpe
+    """
+    def get_observation_for_delta_a_openloop_for_mpjpe(self):
+        self._refresh_sim_tensors() # 从仿真器底层拉取最新的所有物理状态张量
+        # self.episode_length_buf += 1 # 存活步数加一
+        # # update counters
+        # self._update_counters_each_step()
+        # self.last_episode_length_buf = self.episode_length_buf.clone()
+
+        # self._pre_compute_observations_callback() # 在算观测前做一些坐标系转换的准备工作
+        # self._update_tasks_callback() # 处理特定的环境任务（比如此时是否需要推一下机器人）
+        
+        # # compute observations, rewards, resets, ...
+        # self._check_termination() # 检查有没有机器人摔倒/超时了 (计算 Done)
+        # self._compute_reward() # 结算这步的奖励 (计算 Reward)
+        
+        # # check terminations
+        # env_ids = self.reset_buf.nonzero(as_tuple=False).flatten() # 捞出所有被判死刑的环境 ID
+        # self.reset_envs_idx(env_ids) # 真正去重置它们的参数位置
+
+        # set envs
+        # refresh_env_ids = self.need_to_refresh_envs.nonzero(as_tuple=False).flatten()
+        # if len(refresh_env_ids) > 0:
+        #     # 对于重置的机器，把最新的（被拉回原点的）坐标强制塞进底层物理引擎
+        #     self.simulator.set_actor_root_state_tensor(refresh_env_ids, self.simulator.all_root_states)
+        #     self.simulator.set_dof_state_tensor(refresh_env_ids, self.simulator.dof_state)
+        #     self.need_to_refresh_envs[refresh_env_ids] = False
+
+        self._compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
+        # 获取最新的观测向量 (计算 Obs)
+        
+        self._post_compute_observations_callback()
+
+        # return clipped obs, clipped states (None), rewards, dones and infos
+        clip_obs = self.config.normalization.clip_observations
+        for obs_key, obs_val in self.obs_buf_dict.items():#obs_buf_dict是按照字母顺序排列好的观测值字典，2个键是actor_obs和critic_obs,2个值是对应的观测张量列表
+            self.obs_buf_dict[obs_key] = torch.clip(obs_val, -clip_obs, clip_obs) # 同样限制观测值的极值防爆
+
+        for key in self.history_handler.history.keys():
+            self.history_handler.add(key, self.hist_obs_dict[key]) # 将当前状态hist_obs_dict(加噪且放缩过的这一期的观测值)推入历史序列，供未来使用
+
+        # self.extras["to_log"] = self.log_dict
+        # if self.viewer:
+        #     self._setup_simulator_control()
+        #     self._setup_simulator_next_task()
+        #     if self.debug_viz:
+        #         self._draw_debug_vis()
+        return self.obs_buf_dict, self.rew_buf, self.reset_buf, self.extras
+
+    
+    
     # 占位符回调函数，子类可以重写它们
     def _setup_simulator_next_task(self):
         pass

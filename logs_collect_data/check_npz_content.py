@@ -151,7 +151,20 @@ python logs_collect_data/replay_motion_in_sim.py \
 +log_task_name=
 
 
+# HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
+# +checkpoint=logs/DeltaA_Training/20260410_105832-openloopDeltaA_training-delta_a-g1_29dof_anneal_23dof/model_5100.pt \
+# +mpjpe_eval_pkl_path=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum2_20260413154610.pkl \
+# +mpjpe_eval_csv_path=logs_eval/TEST/mpjpe_summary.csv \
+# +mpjpe_eval_step_csv_path=logs_eval/TEST/mpjpe_steps.csv \
+# +mpjpe_eval_use_deltaa_compensation=True \
+# +device=cuda:0 \
+# robot.motion.motion_file=mpjpe_eval_pkl_path
+
 HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
-+mpjpe_eval_pkl_path=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum2_20260413154610.pkl \
++checkpoint=logs/DeltaA_Training/20260413_204233-openloopDeltaA_training-delta_a-g1_29dof_anneal_23dof/model_50900.pt \
++mpjpe_eval_pkl_path=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum1_20260413154405.pkl \
 +mpjpe_eval_csv_path=logs_eval/TEST/mpjpe_summary.csv \
-+mpjpe_eval_step_csv_path=logs_eval/TEST/mpjpe_steps.csv
++mpjpe_eval_step_csv_path=logs_eval/TEST/mpjpe_steps.csv \
++mpjpe_eval_use_deltaa_compensation=False \
++device=cuda:0 \
++robot.motion.motion_file='${mpjpe_eval_pkl_path}'
