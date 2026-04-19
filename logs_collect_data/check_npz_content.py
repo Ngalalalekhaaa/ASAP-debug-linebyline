@@ -84,7 +84,7 @@ nohup python humanoidverse/train_agent.py \
 +robot=g1/g1_29dof_anneal_23dof \
 +terrain=terrain_locomotion_plane \
 +obs=delta_a/open_loop \
-num_envs=4096 \
+num_envs=8192 \
 project_name=DeltaA_Training \
 robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum128_20260413184401.pkl" \
 env.config.max_episode_length_s=1.0 \
@@ -125,11 +125,12 @@ log_task_name=check_stop_error_num3 \
 
 HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
 +checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt \
-+simulator=genesis
++simulator=genesis \
++env.config.save_motion=True \
++env.config.save_note=timeoutonly_mtnum1024 \
++env.config.eval_timestamp=$(date +%Y%m%d_%H%M%S) 
 #+opt=eval_analysis_plot_motion_tracking_openloop
-# +env.config.save_motion=True \
-# +env.config.save_note=timeoutonly_mtnum1 \
-# +env.config.eval_timestamp=$(date +%Y%m%d_%H%M%S) \
+
 
 
 
