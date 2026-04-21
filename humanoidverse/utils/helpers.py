@@ -101,7 +101,7 @@ def pre_process_config(config) -> None:
                 logger.info(f"{obs_key}: {key} has dim: {auxiliary_obs_dims[key]}")
                 
     # 将计算好的所有输入维度保存到 robot 配置中，供后续初始化神经网络（PPO）使用
-    config.robot.algo_obs_dim_dict = obs_dim_dict
+    config.robot.algo_obs_dim_dict = obs_dim_dict#重点！！！保存的方式，是重新写入配置config.robot.algo_obs_dim_dict
     logger.info(f"algo_obs_dim_dict: {config.robot.algo_obs_dim_dict}")
 
     # 下面这段被注释的代码原本是用于自动同步网络输出维度与动作维度（action_dim）的
