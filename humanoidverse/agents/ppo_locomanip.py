@@ -68,7 +68,7 @@ class PPOLocoManip(BaseAlgo):
 
     def _setup_models_and_optimizer(self):
         self.actor_stand = PPOActor(
-            obs_dim_dict=self.algo_obs_dim_dict,#self.algo_obs_dim_dict是由condig.robot.algo_obs_dim_dict赋值的，后者在pre_process_config函数中被计算并保存。主要是根据环境配置中的观测项和辅助观测项来计算每个观测键的输入维度的
+            obs_dim_dict=self.algo_obs_dim_dict,
             module_config_dict=self.config.module_dict.actor_stand,
             num_actions=self.num_act,
             init_noise_std=self.config.init_noise_std

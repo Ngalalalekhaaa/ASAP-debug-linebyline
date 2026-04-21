@@ -3,11 +3,6 @@
 eval_timestamp: ${now:%Y%m%d_%H%M%S}
 eval_name: TEST
 eval_log_dir: logs_eval/${eval_name}/${eval_timestamp}
-deterministic_eval: false
-deterministic_torch: false
-deterministic_eval_hard_episode_restart: false
-deterministic_eval_reset_scene: false
-deterministic_eval_drop_warmup: false
 hydra:
   run:
     dir: ${eval_log_dir}

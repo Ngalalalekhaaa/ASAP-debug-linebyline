@@ -19,70 +19,6 @@ from loguru import logger # 一个非常好用的彩色日志库
 
 import threading # 引入多线程。为了在机器人仿真的同时监听键盘输入，必须开新线程，否则会卡死仿真主循环
 # from pynput import keyboard # pynput用于捕获键盘按键（注释掉了可能在其他地方导入了）
-from humanoidverse.utils.common import seeding
-
-
-def _as_bool(v):#将传入参数转化为布尔值，如果是字符串，则判断是否在 ("1", "true", "yes", "y", "on")中
-    if isinstance(v, str):
-        return v.strip().lower() in ("1", "true", "yes", "y", "on")
-    return bool(v)#类型转换：False和各种空值会被转换为False，其他值转换为True
-
-
-def _apply_deterministic_eval_overrides(config):
-    """Apply reproducibility-oriented overrides for evaluation only."""
-    if not _as_bool(config.get("deterministic_eval", False)):
-        return
-
-    logger.info("deterministic_eval=True: applying eval-time deterministic overrides.")
-
-    # Disable observation noise at eval time to avoid per-step stochastic perturbations.
-    if config.get("env", None) is not None and config.env.get("config", None) is not None:
-        env_cfg = config.env.config
-        if env_cfg.get("obs", None) is not None and env_cfg.obs.get("noise_scales", None) is not None:
-            for key in env_cfg.obs.noise_scales.keys():
-                env_cfg.obs.noise_scales[key] = 0.0
-            logger.info("deterministic_eval=True: set all obs.noise_scales to 0.0")
-
-        if env_cfg.get("obs", None) is not None and "add_noise_currculum" in env_cfg.obs:
-            env_cfg.obs.add_noise_currculum = False
-
-        if "noise_to_initial_level" in env_cfg:
-            env_cfg.noise_to_initial_level = 0
-
-        if "enforce_randomize_motion_start_eval" in env_cfg:
-            env_cfg.enforce_randomize_motion_start_eval = False
-
-        # Freeze curriculum terms that can drift episode-to-episode during long eval runs.
-        # if env_cfg.get("rewards", None) is not None:
-        #     if "reward_penalty_curriculum" in env_cfg.rewards:
-        #         env_cfg.rewards.reward_penalty_curriculum = False
-        #     if env_cfg.rewards.get("reward_limit", None) is not None and env_cfg.rewards.reward_limit.get("reward_limits_curriculum", None) is not None:
-        #         limits_cfg = env_cfg.rewards.reward_limit.reward_limits_curriculum
-        #         if "soft_dof_pos_curriculum" in limits_cfg:
-        #             limits_cfg.soft_dof_pos_curriculum = False
-        #         if "soft_dof_vel_curriculum" in limits_cfg:
-        #             limits_cfg.soft_dof_vel_curriculum = False
-        #         if "soft_torque_curriculum" in limits_cfg:
-        #             limits_cfg.soft_torque_curriculum = False
-        #         logger.info("deterministic_eval=True: disabled reward limit curricula.")
-
-        # if env_cfg.get("termination_curriculum", None) is not None and "terminate_when_motion_far_curriculum" in env_cfg.termination_curriculum:
-        #     env_cfg.termination_curriculum.terminate_when_motion_far_curriculum = False
-        #     logger.info("deterministic_eval=True: disabled terminate_when_motion_far curriculum.")
-
-        # if "resample_motion_when_training" in env_cfg:
-        #     env_cfg.resample_motion_when_training = False
-
-        # For Genesis, force scene-level reset between episodes to reduce solver-state carry-over.
-        # simulator_target = str(config.simulator.get("_target_", "")).lower() if config.get("simulator", None) is not None else ""
-        # if "genesis" in simulator_target:
-        #     config.deterministic_eval_reset_scene = True
-        #     logger.info("deterministic_eval=True: enable scene.reset() on full-episode reset for Genesis.")
-
-        # Enable a unified restart path after every done in eval loop.
-        config.deterministic_eval_hard_episode_restart = True
-        # Drop the very first episode as warmup, then report stable deterministic stream.
-        # config.deterministic_eval_drop_warmup = True
 
 # ============================================================================
 # 函数 1: on_press
@@ -216,16 +152,6 @@ def main(override_config: OmegaConf):
             config = OmegaConf.merge(config, eval_overrides)
         else:
             config = override_config
-
-    # ---------------- 2.1 可复现评估设置 ----------------
-    # 统一设置 Python/NumPy/PyTorch 的随机种子。
-    seed = int(config.get("seed", 0))
-    torch_deterministic = _as_bool(config.get("torch_deterministic", config.get("deterministic_torch", False)))
-    seeding(seed=seed, torch_deterministic=torch_deterministic)
-    logger.info(f"Eval seeding applied: seed={seed}, torch_deterministic={torch_deterministic}")
-
-    # 可选：评估态一键关闭观测噪声，减少每次评估的随机差异。
-    _apply_deterministic_eval_overrides(config)
             
     # ---------------- 3. 仿真器选择与初始化 ----------------
     # 获取配置中使用的仿真器类型（目前主流的是老的 IsaacGym 和新的基于 Omniverse 的 IsaacSim/Lab）
@@ -282,9 +208,6 @@ def main(override_config: OmegaConf):
     
     # 核心：根据配置文件实例化强化学习环境（比如包含了地形、机器人模型、传感器等的仿真世界）
     env = instantiate(config.env, device=device)
-    setattr(env, "_deterministic_eval_hard_episode_restart", _as_bool(config.get("deterministic_eval_hard_episode_restart", False)))
-    setattr(env, "_deterministic_eval_reset_scene", _as_bool(config.get("deterministic_eval_reset_scene", False)))
-    setattr(env, "_deterministic_eval_drop_warmup", _as_bool(config.get("deterministic_eval_drop_warmup", False)))
 
     # # 构造一个全0的动作输入（因为刚重置，还没有网络输出动作）
     # actions = torch.zeros(env.num_envs, env.dim_actions, device=env.device, requires_grad=False)
@@ -311,11 +234,6 @@ def main(override_config: OmegaConf):
     # ---------------- 7. 模型导出部署阶段 (Sim2Real 必备) ----------------
     EXPORT_POLICY = False # 是否导出为 TorchScript JIT 格式
     EXPORT_ONNX = True # 是否导出为 ONNX 格式（主流的跨平台、跨语言推理框架）
-
-    # 确定性评估优先：避免导出时额外 reset 干扰“首生命/回合序列”。
-    # if _as_bool(config.get("deterministic_eval", False)):
-    #     EXPORT_ONNX = False
-    #     logger.info("deterministic_eval=True: disable ONNX export to avoid extra warmup reset.")
 
     # 当启用 save_motion 采集时，导出 ONNX 会触发一次额外 reset_all（get_example_obs），
     # 可能污染“首生命”采样统计，因此默认跳过导出。
@@ -354,20 +272,17 @@ def main(override_config: OmegaConf):
     # ---------------- 8. 启动死循环，开始评估 ----------------
     # 进入仿真的主循环：不断收集环境观测值 -> 神经网络输出关节命令 -> 环境执行命令步进仿真
     
-    algo.evaluate_policy()
+    #algo.evaluate_policy()
     #algo.collect_delta_a_sim_data()
-    # algo.evaluate_policy_for_mpjpe(
-    #     pkl_path=config.get("mpjpe_eval_pkl_path", None),
-    #     motion_keys=config.get("mpjpe_eval_motion_keys", None),
-    #     max_steps=config.get("mpjpe_eval_max_steps", None),
-    #     fallback_env_id=config.get("mpjpe_eval_fallback_env_id", 0),
-    #     csv_path=config.get("mpjpe_eval_csv_path", None),
-    #     step_csv_path=config.get("mpjpe_eval_step_csv_path", None),
-    #     use_deltaa_compensation=config.get("mpjpe_eval_use_deltaa_compensation", True),
-    #     deltaa_checkpoint=config.get("deltaa_checkpoint", None),
-    #     deltaa_fusion_mode=config.get("mpjpe_eval_deltaa_fusion_mode", "auto"),
-    #     deltaa_scale=config.get("mpjpe_eval_deltaa_scale", 1.0),
-    # )
+    algo.evaluate_policy_for_mpjpe(
+        pkl_path=config.get("mpjpe_eval_pkl_path", None),
+        motion_keys=config.get("mpjpe_eval_motion_keys", None),
+        max_steps=config.get("mpjpe_eval_max_steps", None),
+        fallback_env_id=config.get("mpjpe_eval_fallback_env_id", 0),
+        csv_path=config.get("mpjpe_eval_csv_path", None),
+        step_csv_path=config.get("mpjpe_eval_step_csv_path", None),
+        use_deltaa_compensation=config.get("mpjpe_eval_use_deltaa_compensation", True),
+    )
 
 # 标准 python 执行入口
 if __name__ == "__main__":

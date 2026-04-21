@@ -5,7 +5,6 @@ import joblib
 import numpy as np
 import re
 import csv
-import copy
 from pathlib import Path
 
 from humanoidverse.agents.modules.ppo_modules import PPOActor, PPOCritic
@@ -140,7 +139,7 @@ class PPO(BaseAlgo):
         """
         # 实例化 Actor 网络并放到 GPU 上
         self.actor = PPOActor(
-            obs_dim_dict=self.algo_obs_dim_dict,#self.algo_obs_dim_dict是由condig.robot.algo_obs_dim_dict赋值的，后者在pre_process_config函数中被计算并保存。主要是根据环境配置中的观测项和辅助观测项来计算每个观测键的输入维度的
+            obs_dim_dict=self.algo_obs_dim_dict,
             module_config_dict=self.config.module_dict.actor, # MLP 隐藏层配置等
             num_actions=self.num_act,
             init_noise_std=self.config.init_noise_std # 初始探索噪声的标准差
@@ -487,7 +486,7 @@ class PPO(BaseAlgo):
 
         # 从 Storage 中创建一个打乱顺序的批次生成器。
         # 比如一共收集了 10万 条数据，分 4 个 mini_batch，复习 5 个 epoch。
-        generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)#拿出了一批数据
+        generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
 
         for policy_state_dict in generator: # 每次抽出一小把记忆
             # Move everything to the device
@@ -762,9 +761,6 @@ class PPO(BaseAlgo):
         actor_state.update(
             {"obs": obs_dict, "rewards": rewards, "dones": dones, "extras": extras}
         )
-        # Keep eval behavior consistent with rollout path for recurrent implementations.
-        # self.actor.reset(dones)
-        # self.critic.reset(dones)
         return actor_state
 
     @torch.no_grad()
@@ -791,21 +787,14 @@ class PPO(BaseAlgo):
         【被谁调用】专门的 evaluate.py 或 play.py 脚本。
         """
         self._create_eval_callbacks() # 挂载插件（如摄像头录屏）
-        self._pre_evaluate_policy() # 告诉环境进入考试模式，关掉随机化干扰。reset_all会有一次。
+        self._pre_evaluate_policy() # 告诉环境进入考试模式，关掉随机化干扰。reset_all
         actor_state = self._create_actor_state() # 拿个小本本记录测试时的短期状态
         step = 0
-        self.eval_policy = self._get_inference_policy() # 先设actor网络为eval模式，然后提取纯净大脑模型（这个函数输入action_obs,输出动作均值）
-
-        deterministic_hard_restart = bool(getattr(self.env, "_deterministic_eval_hard_episode_restart", False))
-        drop_warmup_episode = deterministic_hard_restart and bool(getattr(self.env, "_deterministic_eval_drop_warmup", False))
-        warmup_finished = not drop_warmup_episode
-        if drop_warmup_episode:
-            setattr(self.env, "_suppress_eval_return_logging", True)
-
+        self.eval_policy = self._get_inference_policy() # 提取纯净大脑模型（这个函数输入action_obs,输出动作均值）
         obs_dict = self.env.reset_all() # 机器人归零发车
         init_actions = torch.zeros(self.env.num_envs, self.num_act, device=self.device) # 第一步不发力
         actor_state.update({"obs": obs_dict, "actions": init_actions})
-        actor_state = self._pre_eval_env_step(actor_state) # 预热算第一步动作。（相当于reset_all从初始位置执行全0动作0.02s后的状态，通过该状态推出的第一步动作）
+        actor_state = self._pre_eval_env_step(actor_state) # 预热算第一步动作
         
         import pprint # 导入漂亮的打印库
         
@@ -826,31 +815,7 @@ class PPO(BaseAlgo):
             actor_state["step"] = step
             
             actor_state = self._pre_eval_env_step(actor_state) # 脑力运算：看传感器出关节扭矩
-            # try:
             actor_state = self.env_step(actor_state) # 物理运算：物理引擎演进
-            # except Exception as e:
-            #     if "Viewer closed." in str(e):
-            #         logger.info("Viewer closed. Stop evaluation loop.")
-            #         break
-            #     raise
-
-            # Optional deterministic eval mode: always restart with the same explicit path
-            # instead of relying on implicit in-step reset semantics.
-            if deterministic_hard_restart:
-                dones = actor_state.get("dones", None)
-                if dones is not None and torch.any(dones > 0):
-                    # if not warmup_finished:
-                    #     warmup_finished = True
-                    #     setattr(self.env, "_suppress_eval_return_logging", False)
-                    #     logger.info("deterministic_eval: warmup episode discarded, start stable episode stream.")
-                    obs_dict = self.env.reset_all()
-                    init_actions = torch.zeros(self.env.num_envs, self.num_act, device=self.device)
-                    actor_state.update({"obs": obs_dict, "actions": init_actions})
-                    actor_state = self._pre_eval_env_step(actor_state)
-                    actor_state["step"] = step
-                    step += 1
-                    continue
-
             actor_state = self._post_eval_env_step(actor_state) # 善后处理：如果插件要截图，就在这截图
             
             # # ================= 全量打印模块 开始 =================
@@ -862,27 +827,14 @@ class PPO(BaseAlgo):
         self._post_evaluate_policy() # (实际上这里 while True 执行不到)
 
     @torch.no_grad()
-    def evaluate_policy_for_mpjpe(
-        self,
-        pkl_path=None,
-        motion_keys=None,
-        max_steps=None,
-        fallback_env_id=0,
-        csv_path=None,
-        step_csv_path=None,
-        use_deltaa_compensation=True,
-        deltaa_checkpoint=None,
-        deltaa_fusion_mode="auto",
-        deltaa_scale=1.0,
-    ):
+    def evaluate_policy_for_mpjpe(self, pkl_path=None, motion_keys=None, max_steps=None, fallback_env_id=0, csv_path=None, step_csv_path=None, use_deltaa_compensation=True):
         """
-        【函数作用】基于离线采集的 pkl 做 rollout 评估：仅同步第 0 帧状态，后续动作由策略网络/Delta-A 网络输出。
+        【函数作用】基于离线采集的 pkl 逐帧回灌状态和动作，计算仿真器与数据源环境的误差指标。
         【执行逻辑】
-        1) 将数据集第 0 帧状态强制写回仿真器；
-        2) 每步用 policy 网络基于当前观测输出 base action；
-        3) 可选：Delta-A 网络基于“当前状态 + base action”输出补偿动作；
-        4) 执行动作后得到仿真下一帧，与数据集第 t+1 帧做误差比较；
-        5) 统计每个动作段平均值 + 导出汇总 CSV + 导出逐步 CSV。
+        1) 将数据集第 t 帧状态强制写回仿真器；
+        2) 执行动作 t，得到仿真下一帧；
+        3) 与数据集第 t+1 帧做误差比较；
+        4) 统计每个动作段平均值 + 导出汇总 CSV + 导出逐步 CSV。
         【参数说明】
         - pkl_path: 离线动作数据集路径。
         - motion_keys: 仅评估指定动作键；None 表示全量评估。
@@ -890,10 +842,7 @@ class PPO(BaseAlgo):
         - fallback_env_id: motion_key 不能映射 env_id 时使用的兜底 env。
         - csv_path: 汇总 CSV 输出路径（每个动作一行 + overall 一行）。
         - step_csv_path: 逐步 CSV 输出路径（每个时间步一行）。
-        - use_deltaa_compensation: 是否在每步将 delta-a 模型输出叠加到 base action 上。
-        - deltaa_checkpoint: Delta-A 模型权重路径；None 时默认使用当前 policy 权重复制一个独立 Delta-A 网络。
-        - deltaa_fusion_mode: delta 动作融合方式，可选 [auto, policy_plus_delta, openloop_plus_delta]。
-        - deltaa_scale: delta 动作缩放系数（默认 1.0）。
+        - use_deltaa_compensation: 是否在每步将 delta-a 模型输出叠加到数据集动作上。
         【指标定义】
         - E_g-mpjpe: 全局身体位置误差 (mm)
         - E_mpjpe: 根节点对齐后的平均关节误差 (mm)
@@ -902,88 +851,18 @@ class PPO(BaseAlgo):
         """
         self._eval_mode()
         self.env.set_is_evaluating()
-        # 仅抑制初始化 reset 阶段的 eval-return 噪声日志，不影响后续评估统计。
-        setattr(self.env, "_suppress_eval_return_logging", True)
-        try:
-            _ = self.env.reset_all()#需要加，因为进入评估模式后，重置会得到固定初始状态。前面没有执行评估模式时，重置得到的初始状态是随机的，会导致结果每次不一样。但为什么？难道不应该加载的是已有数据，就算前面是随机的初始状态，加载了数据后也应该是一样的啊？但为什么不一样呢？
-        finally:
-            setattr(self.env, "_suppress_eval_return_logging", False)
+        _ = self.env.reset_all()#需要加，因为进入评估模式后，重置会得到固定初始状态。前面没有执行评估模式时，重置得到的初始状态是随机的，会导致结果每次不一样。但为什么？难道不应该加载的是已有数据，就算前面是随机的初始状态，加载了数据后也应该是一样的啊？但为什么不一样呢？
 
         if isinstance(use_deltaa_compensation, str):
             use_deltaa_compensation = use_deltaa_compensation.strip().lower() in ("1", "true", "yes", "y", "on")
         else:
             use_deltaa_compensation = bool(use_deltaa_compensation)
 
-        if isinstance(deltaa_scale, str):
-            deltaa_scale = float(deltaa_scale)
-        else:
-            deltaa_scale = float(deltaa_scale)
-
-        if not use_deltaa_compensation:
-            logger.warning(
-                "mpjpe_eval_use_deltaa_compensation=False: delta-a branch is disabled. "
-                "mpjpe_eval_deltaa_fusion_mode/mpjpe_eval_deltaa_scale will be ignored."
-            )
-
-        deltaa_fusion_mode = str(deltaa_fusion_mode).strip().lower()
-        valid_fusion_modes = {"auto", "policy_plus_delta", "openloop_plus_delta"}
-        if deltaa_fusion_mode not in valid_fusion_modes:
-            raise ValueError(
-                f"Invalid deltaa_fusion_mode={deltaa_fusion_mode}. "
-                f"Expect one of {sorted(valid_fusion_modes)}."
-            )
-
-        policy_actor, policy_actor_obs_dim = self._create_eval_actor_for_mpjpe(checkpoint_path=None, actor_label="policy")
-        policy_inference = policy_actor.act_inference
-        if policy_actor_obs_dim != int(self.algo_obs_dim_dict["actor_obs"]):
-            raise RuntimeError(
-                f"Policy actor obs dim mismatch: expect {int(self.algo_obs_dim_dict['actor_obs'])}, got {policy_actor_obs_dim}."
-            )
-
-        deltaa_actor = None
-        deltaa_inference = None
-        deltaa_actor_obs_dim = None
-        deltaa_obs_mode = None
+        self.eval_policy = None
         if use_deltaa_compensation:
-            deltaa_actor, deltaa_actor_obs_dim = self._create_eval_actor_for_mpjpe(
-                checkpoint_path=deltaa_checkpoint,
-                actor_label="delta-a",
-            )
-            deltaa_inference = deltaa_actor.act_inference
-            if deltaa_actor_obs_dim == int(self.algo_obs_dim_dict["actor_obs"]):
-                deltaa_obs_mode = "actor_obs"
-            elif deltaa_actor_obs_dim == 108:
-                deltaa_obs_mode = "deltaa_open_loop_108"
-            else:
-                raise RuntimeError(
-                    "Unsupported delta-a actor obs dim: "
-                    f"{deltaa_actor_obs_dim}. Only {int(self.algo_obs_dim_dict['actor_obs'])} or 108 are supported."
-                )
+            self.eval_policy = self._get_inference_policy() # 提取纯净大脑模型（这个函数输入action_obs,输出动作均值）
 
-        if use_deltaa_compensation:
-            if deltaa_fusion_mode == "auto":
-                if deltaa_obs_mode == "deltaa_open_loop_108":
-                    deltaa_fusion_mode_resolved = "openloop_plus_delta"
-                else:
-                    deltaa_fusion_mode_resolved = "policy_plus_delta"
-            else:
-                deltaa_fusion_mode_resolved = deltaa_fusion_mode
-        else:
-            deltaa_fusion_mode_resolved = "disabled"
-
-        logger.info(
-            "MPJPE rollout mode enabled: init-frame sync + policy rollout | "
-            f"delta-a compensation={use_deltaa_compensation} | "
-            f"deltaa_checkpoint={deltaa_checkpoint} | deltaa_obs_mode={deltaa_obs_mode} | "
-            f"deltaa_fusion_mode={deltaa_fusion_mode_resolved} | deltaa_scale={deltaa_scale}"
-        )
-
-        if self.env.num_envs > 1:
-            logger.info(
-                f"MPJPE eval is running with num_envs={self.env.num_envs}. "
-                "Per-motion rollout only drives its mapped env (e.g. motion0->env0). "
-                "Other envs are not used for MPJPE metrics."
-            )
+        logger.info(f"MPJPE delta-a compensation enabled: {use_deltaa_compensation}")
 
 
         # 1) 加载并筛选动作数据
@@ -1010,7 +889,7 @@ class PPO(BaseAlgo):
         for motion_key in selected_keys:
             motion_data = dataset_dict[motion_key]#一个动作的各种记录数据字段组成的字典
             # 逐帧状态回灌至少需要这些字段
-            required_keys = ["root_trans_offset", "root_rot", "dof", "pose_aa"]
+            required_keys = ["root_trans_offset", "root_rot", "dof", "action", "pose_aa"]
             missing = [k for k in required_keys if k not in motion_data]
             if len(missing) > 0:
                 logger.warning(f"Skip {motion_key}: missing keys {missing}")
@@ -1021,9 +900,7 @@ class PPO(BaseAlgo):
             # 每条 motion 开始前清空该 env 的时序历史，避免上一条动作的历史观测污染当前评估。
             reset_mask = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
             reset_mask[env_id] = True
-            policy_actor.reset(reset_mask)
-            if deltaa_actor is not None:
-                deltaa_actor.reset(reset_mask)
+            self.actor.reset(reset_mask)
             self.critic.reset(reset_mask)
             if hasattr(self.env, "history_handler") and self.env.history_handler is not None:
                 self.env.history_handler.reset(torch.tensor([env_id], dtype=torch.long, device=self.device))
@@ -1033,6 +910,7 @@ class PPO(BaseAlgo):
             root_pos = torch.as_tensor(motion_data["root_trans_offset"], dtype=torch.float, device=self.device)
             root_rot = torch.as_tensor(motion_data["root_rot"], dtype=torch.float, device=self.device)
             dof_pos = torch.as_tensor(motion_data["dof"], dtype=torch.float, device=self.device)
+            actions = torch.as_tensor(motion_data["action"], dtype=torch.float, device=self.device)
 
             dof_vel = None
             if "dof_vel" in motion_data:
@@ -1054,6 +932,7 @@ class PPO(BaseAlgo):
                 root_pos.shape[0],
                 root_rot.shape[0],
                 dof_pos.shape[0],
+                actions.shape[0],
                 gt_body_pos.shape[0],
             )
             if dof_vel is not None:
@@ -1084,42 +963,7 @@ class PPO(BaseAlgo):
             # 若 root_lin_vel 是 m/s，这里将其换算成 mm/frame 便于和指标单位一致
             mm_per_frame_from_mps = 1000.0 / fps#每帧多少毫米（基座线速度）
 
-            # 只在第 0 帧进行一次状态同步，后续全部由 rollout 推进。
-            self._set_env_state_for_mpjpe(
-                env_id=env_id,
-                root_pos_t=root_pos[0],
-                root_rot_t=root_rot[0],
-                dof_pos_t=dof_pos[0],
-                dof_vel_t=(dof_vel[0] if dof_vel is not None else None),
-                root_lin_vel_t=(root_lin_vel[0] if root_lin_vel is not None else None),
-                root_ang_vel_t=(root_ang_vel[0] if root_ang_vel is not None else None),
-            )
-            if hasattr(self.env, "episode_length_buf"):
-                self.env.episode_length_buf[env_id] = 0
-            if hasattr(self.env, "last_episode_length_buf"):
-                self.env.last_episode_length_buf[env_id] = 0
-            self._set_motion_context_for_mpjpe(env_id=env_id, motion_key=motion_key, motion_data=motion_data)
-            self._set_action_buffer_for_mpjpe(env_id, torch.zeros(self.num_act, device=self.device))
-
-            # 诊断信息：检查“仅同步第0帧”是否和数据集 GT 对齐。
-            # 若这里已经很大，优先排查状态回灌/坐标系/关节顺序；
-            # 若这里很小但后续变大，说明主要是 rollout 误差累积（策略能力问题）。
-            pred_init_body = self._get_sim_body_positions_for_mpjpe(env_id)
-            gt_init_body = gt_body_pos[0]
-            valid_init_body_num = min(pred_init_body.shape[0], gt_init_body.shape[0])
-            pred_init_body = pred_init_body[:valid_init_body_num]
-            gt_init_body = gt_init_body[:valid_init_body_num]
-            init_g_err = torch.norm(pred_init_body - gt_init_body, dim=-1).mean() * 1000.0
-            pred_init_rel = pred_init_body - pred_init_body[0:1]
-            gt_init_rel = gt_init_body - gt_init_body[0:1]
-            init_rel_err = torch.norm(pred_init_rel - gt_init_rel, dim=-1).mean() * 1000.0
-            logger.info(
-                f"[{motion_key}] init alignment | env={env_id} | "
-                f"E_g-mpjpe@t0={float(init_g_err.item()):.4f} mm | "
-                f"E_mpjpe@t0={float(init_rel_err.item()):.4f} mm"
-            )
-
-            # action_full: 环境级动作缓冲，仅把目标 env_id 那一行写成 rollout 动作
+            # action_full: 环境级动作缓冲，仅把目标 env_id 那一行写成数据集动作
             action_full = torch.zeros(self.env.num_envs, self.num_act, device=self.device)
             # 逐步误差缓存（后面先求动作均值，再写 CSV）
             g_mpjpe_steps = []
@@ -1130,55 +974,35 @@ class PPO(BaseAlgo):
             gt_body_seq = []
             pred_root_vel_seq = []
             gt_root_vel_seq = []
-            base_action_norm_steps = []
-            delta_action_norm_steps = []
-            final_action_norm_steps = []
 
             for t in range(steps):
-                sim_root_pos_before = self.env.simulator.robot_root_states[env_id, 0:3].clone()
-
-                actor_obs = self._get_actor_obs_for_mpjpe(update_history=True)
-                base_actions = policy_inference(actor_obs).to(self.device)
-                base_action_env = self._fit_vector_dim_for_mpjpe(
-                    self._extract_action_for_env_for_mpjpe(base_actions, env_id),
-                    self.num_act,
+                self._set_env_state_for_mpjpe(#将根状态，关节状态同步到仿真环境中。
+                    env_id=env_id,
+                    root_pos_t=root_pos[t],
+                    root_rot_t=root_rot[t],
+                    dof_pos_t=dof_pos[t],
+                    dof_vel_t=(dof_vel[t] if dof_vel is not None else None),
+                    root_lin_vel_t=(root_lin_vel[t] if root_lin_vel is not None else None),
+                    root_ang_vel_t=(root_ang_vel[t] if root_ang_vel is not None else None),
                 )
 
-                final_action_env = base_action_env.clone()
-                if use_deltaa_compensation:
-                    # 将 base action 写入动作缓冲，再重算观测，保证 delta-a 网络拿到“当前状态 + base action”。
-                    self._set_action_buffer_for_mpjpe(env_id, base_action_env)
-                    if deltaa_obs_mode == "actor_obs":
-                        deltaa_actor_obs = self._get_actor_obs_for_mpjpe(update_history=False)
-                    else:
-                        deltaa_actor_obs = self._get_deltaa_openloop_actor_obs_for_mpjpe(
-                            expected_dim=deltaa_actor_obs_dim,
-                        )
-                    deltaa_actions = deltaa_inference(deltaa_actor_obs).to(self.device)
-                    deltaa_action_env = self._fit_vector_dim_for_mpjpe(
-                        self._extract_action_for_env_for_mpjpe(deltaa_actions, env_id),
-                        self.num_act,
-                    )
-
-                    if deltaa_fusion_mode_resolved == "openloop_plus_delta":
-                        openloop_actions = self._get_open_loop_action_for_mpjpe()
-                        openloop_action_env = self._fit_vector_dim_for_mpjpe(
-                            self._extract_action_for_env_for_mpjpe(openloop_actions, env_id),
-                            self.num_act,
-                        )
-                        final_action_env = openloop_action_env + deltaa_action_env * deltaa_scale
-                    else:
-                        final_action_env = final_action_env + deltaa_action_env * deltaa_scale
-
-                    delta_action_norm_steps.append(float(torch.norm(deltaa_action_env).item()))
-                else:
-                    delta_action_norm_steps.append(0.0)
-
-                base_action_norm_steps.append(float(torch.norm(base_action_env).item()))
-                final_action_norm_steps.append(float(torch.norm(final_action_env).item()))
-
                 action_full.zero_()
-                action_full[env_id] = final_action_env
+                action_full[env_id] = self._fit_vector_dim_for_mpjpe(actions[t], self.num_act)
+
+                if use_deltaa_compensation:
+                    obs_for_deltaa_openloop, _, _, _ = self.env.get_observation_for_delta_a_openloop_for_mpjpe()
+                    deltaa_actor_obs = obs_for_deltaa_openloop["actor_obs"].to(self.device)
+                    deltaa_actions = self.eval_policy(deltaa_actor_obs).to(self.device)
+
+                    # 仅对当前评估 env 叠加补偿动作，避免污染其他并行环境。
+                    if deltaa_actions.dim() == 1:
+                        deltaa_action_env = deltaa_actions
+                    elif deltaa_actions.shape[0] > env_id:
+                        deltaa_action_env = deltaa_actions[env_id]
+                    else:
+                        deltaa_action_env = deltaa_actions[0]
+                    action_full[env_id] += self._fit_vector_dim_for_mpjpe(deltaa_action_env, self.num_act)
+
 
                 actor_state = {"step": t, "actions": action_full}
                 actor_state = self._pre_eval_env_step_for_mpjpe(actor_state)
@@ -1212,7 +1036,7 @@ class PPO(BaseAlgo):
                     gt_root_vel_seq.append((gt_root_vel * mm_per_frame_from_mps).detach().cpu())
                 else:
                     # 没有 root_lin_vel 时，退化为位置差分近似速度（单位 mm/frame）
-                    sim_root_disp = (self.env.simulator.robot_root_states[env_id, 0:3] - sim_root_pos_before) * 1000.0
+                    sim_root_disp = (self.env.simulator.robot_root_states[env_id, 0:3] - root_pos[t]) * 1000.0
                     gt_root_disp = (root_pos[t + 1] - root_pos[t]) * 1000.0
                     vel_err = torch.norm(sim_root_disp - gt_root_disp)
                     pred_root_vel_seq.append(sim_root_disp.detach().cpu())
@@ -1283,12 +1107,6 @@ class PPO(BaseAlgo):
                 f"E_acc={motion_metrics['E_acc_mm_per_frame2']:.4f} mm/frame^2 | "
                 f"E_vel={motion_metrics['E_vel_mm_per_frame']:.4f} mm/frame"
             )
-            logger.info(
-                f"[{motion_key}] action_norm | "
-                f"base={float(np.mean(base_action_norm_steps)):.4f} | "
-                f"delta={float(np.mean(delta_action_norm_steps)):.4f} | "
-                f"final={float(np.mean(final_action_norm_steps)):.4f}"
-            )
 
         # 2) 计算 overall（按有效步数加权）
         if total_steps > 0:
@@ -1354,245 +1172,9 @@ class PPO(BaseAlgo):
             "csv_path": csv_output_path,
             "step_csv_path": step_csv_output_path,
             "use_deltaa_compensation": use_deltaa_compensation,
-            "deltaa_checkpoint": deltaa_checkpoint,
-            "deltaa_actor_obs_dim": deltaa_actor_obs_dim,
-            "deltaa_obs_mode": deltaa_obs_mode,
-            "deltaa_fusion_mode": deltaa_fusion_mode_resolved,
-            "deltaa_scale": deltaa_scale,
-            "evaluation_mode": "init_frame_sync_rollout",
             "metrics_per_motion": metrics_per_motion,
             "overall": overall_metrics,
         }
-
-    def _create_eval_actor_for_mpjpe(self, checkpoint_path=None, actor_label="policy"):
-        """【函数作用】创建评估用 actor，并返回其 actor_obs 维度。"""
-        loaded_actor_state_dict = None
-        actor_obs_dim = int(self.algo_obs_dim_dict["actor_obs"])
-
-        if checkpoint_path is not None:
-            ckpt_path = Path(str(checkpoint_path)).expanduser()
-            if not ckpt_path.is_absolute():
-                ckpt_path = (Path.cwd() / ckpt_path).resolve()
-            if not ckpt_path.exists():
-                raise FileNotFoundError(f"{actor_label} checkpoint not found: {ckpt_path}")
-
-            loaded_dict = torch.load(str(ckpt_path), map_location=self.device)
-            if "actor_model_state_dict" not in loaded_dict:
-                raise KeyError(
-                    f"{actor_label} checkpoint missing key 'actor_model_state_dict': {ckpt_path}"
-                )
-            loaded_actor_state_dict = loaded_dict["actor_model_state_dict"]
-            actor_obs_dim = self._infer_actor_obs_dim_from_state_dict_for_mpjpe(
-                state_dict=loaded_actor_state_dict,
-                actor_label=actor_label,
-                checkpoint_path=str(ckpt_path),
-            )
-        elif actor_label == "delta-a":
-            logger.warning(
-                "deltaa_checkpoint is not provided. Delta-A actor will use a copy of current policy weights."
-            )
-
-        if actor_obs_dim == int(self.algo_obs_dim_dict["actor_obs"]):
-            eval_actor = copy.deepcopy(self.actor).to(self.device)
-        else:
-            eval_actor = self._build_eval_actor_with_actor_obs_dim_for_mpjpe(actor_obs_dim)
-
-        if loaded_actor_state_dict is not None:
-            try:
-                eval_actor.load_state_dict(loaded_actor_state_dict)
-            except RuntimeError as err:
-                raise RuntimeError(
-                    f"Failed to load {actor_label} checkpoint {checkpoint_path}. "
-                    "Model architecture/observation dimension may be incompatible with current env."
-                ) from err
-
-        eval_actor.eval()
-        return eval_actor, actor_obs_dim
-
-    def _infer_actor_obs_dim_from_state_dict_for_mpjpe(self, state_dict, actor_label, checkpoint_path):
-        """【函数作用】从 checkpoint 的第一层线性层权重推断 actor_obs 输入维度。"""
-        preferred_key = "actor_module.module.0.weight"
-        if preferred_key in state_dict and torch.is_tensor(state_dict[preferred_key]) and state_dict[preferred_key].dim() == 2:
-            return int(state_dict[preferred_key].shape[1])
-
-        for key, val in state_dict.items():
-            if key.endswith(".0.weight") and torch.is_tensor(val) and val.dim() == 2:
-                return int(val.shape[1])
-
-        raise KeyError(
-            f"Cannot infer actor input dim from {actor_label} checkpoint: {checkpoint_path}. "
-            "Missing first-layer linear weight."
-        )
-
-    def _build_eval_actor_with_actor_obs_dim_for_mpjpe(self, actor_obs_dim):
-        """【函数作用】基于指定 actor_obs 维度构建一个独立 actor。"""
-        obs_dim_dict = {}
-        for key, val in self.algo_obs_dim_dict.items():
-            obs_dim_dict[key] = int(val)
-        obs_dim_dict["actor_obs"] = int(actor_obs_dim)
-
-        module_config_dict = copy.deepcopy(self.config.module_dict.actor)
-        return PPOActor(
-            obs_dim_dict=obs_dim_dict,
-            module_config_dict=module_config_dict,
-            num_actions=self.num_act,
-            init_noise_std=self.config.init_noise_std,
-        ).to(self.device)
-
-    def _get_actor_obs_for_mpjpe(self, update_history=True):
-        """【函数作用】按评估模式刷新并构建 actor 观测，支持可选历史缓存更新。"""
-        self.env._refresh_sim_tensors()
-        if hasattr(self.env, "_pre_compute_observations_callback"):
-            self.env._pre_compute_observations_callback()
-
-        self.env._compute_observations()
-
-        if hasattr(self.env, "_post_compute_observations_callback"):
-            self.env._post_compute_observations_callback()
-
-        clip_obs = self.env.config.normalization.clip_observations
-        for obs_key, obs_val in self.env.obs_buf_dict.items():
-            self.env.obs_buf_dict[obs_key] = torch.clip(obs_val, -clip_obs, clip_obs)
-
-        if (
-            update_history
-            and hasattr(self.env, "history_handler")
-            and self.env.history_handler is not None
-            and hasattr(self.env, "hist_obs_dict")
-        ):
-            for key in self.env.history_handler.history.keys():
-                if key in self.env.hist_obs_dict:
-                    self.env.history_handler.add(key, self.env.hist_obs_dict[key])
-
-        if "actor_obs" not in self.env.obs_buf_dict:
-            raise KeyError("obs_buf_dict does not contain actor_obs, cannot run MPJPE rollout evaluation.")
-        return self.env.obs_buf_dict["actor_obs"].to(self.device)
-
-    def _get_deltaa_openloop_actor_obs_for_mpjpe(self, expected_dim=108):
-        """【函数作用】构建 108 维 open-loop delta-a 观测（按字母序拼接，与训练一致）。"""
-        self.env._refresh_sim_tensors()
-        if hasattr(self.env, "_pre_compute_observations_callback"):
-            self.env._pre_compute_observations_callback()
-
-        openloop_obs_keys = [
-            "base_pos_z",
-            "feet_contact_force",
-            "base_lin_vel",
-            "base_ang_vel",
-            "projected_gravity",
-            "dof_pos",
-            "dof_vel",
-            "actions",
-            "actions_open_loop",
-        ]
-
-        obs_terms = {}
-        for obs_key in openloop_obs_keys:
-            if obs_key == "actions_open_loop":
-                obs_term = self._get_open_loop_action_for_mpjpe()
-            else:
-                getter_name = f"_get_obs_{obs_key}"
-                if not hasattr(self.env, getter_name):
-                    raise AttributeError(
-                        f"Env does not implement {getter_name}, cannot build 108-dim delta-a observation."
-                    )
-                obs_term = getattr(self.env, getter_name)()
-
-            obs_term = obs_term.clone()
-
-            obs_scale = 1.0
-            if hasattr(self.env.config.obs, "obs_scales") and obs_key in self.env.config.obs.obs_scales:
-                obs_scale = float(self.env.config.obs.obs_scales[obs_key])
-
-            noise_scale = 0.0
-            if hasattr(self.env.config.obs, "noise_scales") and obs_key in self.env.config.obs.noise_scales:
-                noise_scale = float(self.env.config.obs.noise_scales[obs_key])
-            noise_extra_scale = float(self.env.current_noise_curriculum_value) if getattr(self.env, "add_noise_currculum", False) else 1.0
-            obs_noise = noise_scale * noise_extra_scale
-            if obs_noise > 0.0:
-                obs_term = obs_term + (torch.rand_like(obs_term) * 2.0 - 1.0) * obs_noise
-
-            obs_terms[obs_key] = obs_term * obs_scale
-
-        ordered_keys = sorted(openloop_obs_keys)
-        deltaa_actor_obs = torch.cat([obs_terms[key] for key in ordered_keys], dim=-1).to(self.device)
-
-        if deltaa_actor_obs.shape[1] != int(expected_dim):
-            raise RuntimeError(
-                "Delta-a open-loop obs dim mismatch. "
-                f"Expect {int(expected_dim)}, got {deltaa_actor_obs.shape[1]}."
-            )
-        return deltaa_actor_obs
-
-    def _get_open_loop_action_for_mpjpe(self):
-        """【函数作用】获取当前时刻开环动作，优先复用环境方法。"""
-        if hasattr(self.env, "get_open_loop_action_at_current_timestep"):
-            return self.env.get_open_loop_action_at_current_timestep().to(self.device)
-
-        required_attrs = ["_motion_lib", "motion_ids", "episode_length_buf", "motion_start_times", "dt"]
-        if not all(hasattr(self.env, attr) for attr in required_attrs):
-            raise RuntimeError(
-                "Cannot build actions_open_loop for delta-a evaluation: env does not provide motion context attributes."
-            )
-
-        motion_times = (self.env.episode_length_buf + 1) * self.env.dt + self.env.motion_start_times
-        motion_action = self.env._motion_lib.get_motion_actions(self.env.motion_ids, motion_times)
-        return motion_action.to(self.device)
-
-    def _set_motion_context_for_mpjpe(self, env_id, motion_key, motion_data=None):
-        """【函数作用】让指定 env 的动作库索引与当前 motion_key/时间相位对齐。"""
-        if not (hasattr(self.env, "motion_ids") and hasattr(self.env, "motion_start_times")):
-            return
-
-        matched = re.search(r"(\d+)$", motion_key)
-        if matched is None:
-            motion_idx = int(self.env.motion_ids[env_id].item())
-        else:
-            motion_idx = int(matched.group(1))
-
-        max_motion_count = None
-        if hasattr(self.env, "num_motions"):
-            max_motion_count = int(self.env.num_motions)
-        elif hasattr(self.env, "_motion_lib") and hasattr(self.env._motion_lib, "_num_unique_motions"):
-            max_motion_count = int(self.env._motion_lib._num_unique_motions)
-
-        if max_motion_count is not None and max_motion_count > 0:
-            motion_idx = int(max(0, min(motion_idx, max_motion_count - 1)))
-
-        start_time = 0.0
-        if motion_data is not None and "motion_times" in motion_data:
-            motion_times = motion_data["motion_times"]
-            if motion_times is not None and len(motion_times) > 0:
-                start_time = float(motion_times[0])
-
-        self.env.motion_ids[env_id] = motion_idx
-        self.env.motion_start_times[env_id] = start_time
-
-        if hasattr(self.env, "motion_len") and hasattr(self.env, "_motion_lib"):
-            try:
-                motion_len = self.env._motion_lib.get_motion_length(self.env.motion_ids[env_id:env_id + 1])[0]
-                self.env.motion_len[env_id] = motion_len
-            except Exception:
-                pass
-
-    def _extract_action_for_env_for_mpjpe(self, actions, env_id):
-        """【函数作用】从并行动作张量中安全提取指定 env 的动作向量。"""
-        if actions.dim() == 1:
-            return actions
-        if actions.shape[0] == 0:
-            raise ValueError("Empty action tensor returned by policy.")
-        if actions.shape[0] > env_id:
-            return actions[env_id]
-        return actions[0]
-
-    def _set_action_buffer_for_mpjpe(self, env_id, action_env):
-        """【函数作用】将指定 env 的动作写入环境动作缓冲，供后续观测构建使用。"""
-        action_env = self._fit_vector_dim_for_mpjpe(action_env, self.num_act)
-
-        if hasattr(self.env, "actions"):
-            self.env.actions[env_id] = action_env.to(self.env.actions.dtype)
-        if hasattr(self.env, "actions_after_delay"):
-            self.env.actions_after_delay[env_id] = action_env.to(self.env.actions_after_delay.dtype)
 
     def _motion_key_sort_for_mpjpe(self, motion_key):
         """【函数作用】对 motion key 做稳定排序：优先按末尾数字排序，其次按字符串排序。"""
@@ -1883,13 +1465,6 @@ class PPO(BaseAlgo):
         self.env._pre_physics_step(actor_state["actions"])
         self.env._physics_step()
         self.env._refresh_sim_tensors()#从仿真器中刷新最新的根状态、关节状态、刚体位置等张量数据到环境属性中，确保后续读取到的是最新的仿真状态。
-
-        if hasattr(self.env, "episode_length_buf"):
-            self.env.episode_length_buf += 1
-            if hasattr(self.env, "last_episode_length_buf"):
-                self.env.last_episode_length_buf = self.env.episode_length_buf.clone()
-        if hasattr(self.env, "_update_counters_each_step"):
-            self.env._update_counters_each_step()
 
         dones = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
         actor_state.update({"obs": None, "rewards": None, "dones": dones, "extras": {}})

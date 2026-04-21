@@ -680,13 +680,12 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                 total_finished = len(self._eval_completed_returns)
 
                 # 控制台打印：每个结束回合输出一行摘要 + 最近20回合均值。
-                if not bool(getattr(self, "_suppress_eval_return_logging", False)):
-                    print(colored(
-                        f"[eval-return] env={env_idx} ep={ep_idx} done={done_type} len={ep_length} return={ep_return:.6f} | "
-                        f"recent{min(recent_n, total_finished)}_mean_return={recent_return_mean:.6f} "
-                        f"recent{min(recent_n, total_finished)}_mean_len={recent_length_mean:.2f} total_finished={total_finished}",
-                        "cyan"
-                    ))
+                print(colored(
+                    f"[eval-return] env={env_idx} ep={ep_idx} done={done_type} len={ep_length} return={ep_return:.6f} | "
+                    f"recent{min(recent_n, total_finished)}_mean_return={recent_return_mean:.6f} "
+                    f"recent{min(recent_n, total_finished)}_mean_len={recent_length_mean:.2f} total_finished={total_finished}",
+                    "cyan"
+                ))
 
                 # 清空该 env 当前 episode 缓存，开始下一回合统计。
                 self._eval_episode_returns[env_idx] = 0.0

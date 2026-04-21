@@ -86,16 +86,16 @@ nohup python humanoidverse/train_agent.py \
 +obs=delta_a/open_loop \
 num_envs=8192 \
 project_name=DeltaA_Training \
-robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum1024_20260418223442.pkl" \
+robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum128_20260413184401.pkl" \
 env.config.max_episode_length_s=1.0 \
-rewards.reward_scales.penalty_minimal_action_norm=-50 \
-+device=cuda:7 \
+rewards.reward_scales.penalty_minimal_action_norm=-0.5 \
++device=cuda:1 \
 env.config.resample_motion_when_training=True \
 env.config.resample_time_interval_s=10000 \
++checkpoint=logs/DeltaA_Training/20260413_204909-openloopDeltaA_training-delta_a-g1_29dof_anneal_23dof/model_17300.pt \
 experiment_name=after_20260413_204909_17300pt_penaltyMinimalAction0p5 \
-log_task_name=actionnorm_m0p5 \
-> openloopDeltaA_timeoutonly_mtnum1024_20260418223442_cuda7_actionnorm_m50.log 2>&1 &
-# +checkpoint=logs/DeltaA_Training/20260413_204909-openloopDeltaA_training-delta_a-g1_29dof_anneal_23dof/model_17300.pt \
+log_task_name=check_stop_error_num3 \
+> openloopDeltaA_timeoutonly_mtnum128_20260413184401_cuda1_check_stop_error_num3.log 2>&1 &
 
 
 # HYDRA_FULL_ERROR=1 \
@@ -162,14 +162,10 @@ python logs_collect_data/replay_motion_in_sim.py \
 # robot.motion.motion_file=mpjpe_eval_pkl_path
 
 HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
++checkpoint=logs/DeltaA_Training/20260413_204233-openloopDeltaA_training-delta_a-g1_29dof_anneal_23dof/model_50900.pt \
 +mpjpe_eval_pkl_path=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum1_20260413154405.pkl \
 +mpjpe_eval_csv_path=logs_eval/TEST/mpjpe_summary.csv \
 +mpjpe_eval_step_csv_path=logs_eval/TEST/mpjpe_steps.csv \
++mpjpe_eval_use_deltaa_compensation=False \
 +device=cuda:0 \
-+robot.motion.motion_file='${mpjpe_eval_pkl_path}' \
-+checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt \
-+deltaa_checkpoint=logs/DeltaA_Training/20260418_230309-after_20260413_204909_17300pt_penaltyMinimalAction0p5-actionnorm_m0p5-g1_29dof_anneal_23dof/model_10000.pt \
-+mpjpe_eval_use_deltaa_compensation=True \
-+mpjpe_eval_deltaa_fusion_mode=openloop_plus_delta \
-+mpjpe_eval_deltaa_scale=0.05 \
-+num_envs=1
++robot.motion.motion_file='${mpjpe_eval_pkl_path}'

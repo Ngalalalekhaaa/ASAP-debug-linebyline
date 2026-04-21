@@ -612,18 +612,6 @@ class LeggedRobotBase(BaseTask):
         """
         if len(env_ids) == 0:
             return
-
-        # In deterministic eval for Genesis, reset the whole scene when all envs are being reset
-        # to minimize solver internal-state carry-over across episodes.
-        # if (
-        #     self.is_evaluating
-        #     and bool(getattr(self, "_deterministic_eval_reset_scene", False))
-        #     and len(env_ids) == self.num_envs
-        #     and hasattr(self.simulator, "scene")
-        #     and hasattr(self.simulator.scene, "reset")
-        # ):
-        #     self.simulator.scene.reset()
-
         self.need_to_refresh_envs[env_ids] = True#在CPU修改了状态，需要同步刷新到GPU的环境
         self._reset_buffers_callback(env_ids, target_buf) # 清空旧数据：actions，上一步动作，延迟后动作，上一步速度，足端腾空时间等等
         self._reset_tasks_callback(env_ids)        #包含动作起始点的选择（这个函数在motion_tracking.py的_reset_tasks_callback中包含，直接点进去是其父类），域随机化，惩罚项系数，关节物理限制系数，观测噪声系数。 if target_states is not None, reset to target states # 随机出新的物理难度(与奖励的计算标准有关)。域随机化，惩罚项系数，关节物理限制系数，观测噪声系数。
@@ -1202,7 +1190,6 @@ class LeggedRobotBase(BaseTask):
             
             # 出生时给一个介于 -0.5 到 0.5 的微小速度微扰
             self.simulator.robot_root_states[env_ids, 7:13] = torch_rand_float(-0.5, 0.5, (len(env_ids), 6), device=str(self.device)) # [7:10]: lin vel, [10:13]: ang vel
-            # self.simulator.robot_root_states[env_ids, 7:13] = torch_rand_float(0, 0, (len(env_ids), 6), device=str(self.device)) # [7:10]: lin vel, [10:13]: ang vel
 
 
     def _plot_domain_rand_params(self):
