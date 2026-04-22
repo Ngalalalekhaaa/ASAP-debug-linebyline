@@ -1781,8 +1781,8 @@ class PPO(BaseAlgo):
         """【函数作用】考试前网络和环境的模式切换。 【被谁调用】evaluate_policy."""
         self._eval_mode()#保证网络在评估模式，dropout等会关闭。（网络层面，如果没有相关层，删去也没有影响）
         self.env.set_is_evaluating()#实际保证动作选择和开始时间一定。（动作采样层面）
-        if reset_env:
-            _ = self.env.reset_all()
+        # if reset_env:
+        #     _ = self.env.reset_all()
 
         for c in self.eval_callbacks:
             c.on_pre_evaluate_policy()

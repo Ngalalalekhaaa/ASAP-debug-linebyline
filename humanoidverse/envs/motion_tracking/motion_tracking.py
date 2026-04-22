@@ -422,6 +422,8 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             self._ref_motion_length = self._motion_lib.get_motion_length(self.motion_ids)
             self._ref_motion_phase = motion_times / self._ref_motion_length 
             
+            print(f"{self._ref_motion_phase} = {motion_times} / {self._ref_motion_length}")
+            
             if not (torch.all(self._ref_motion_phase >= 0) and torch.all(self._ref_motion_phase <= 1.05)): 
                 max_phase = self._ref_motion_phase.max()
                 
@@ -501,10 +503,17 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             motion_res = self._motion_lib.get_motion_state(self.motion_ids, motion_times, offset=offset)
 
             # 获取噪声比例
-            root_pos_noise = self.config.init_noise_scale.root_pos * self.config.noise_to_initial_level
-            root_rot_noise = self.config.init_noise_scale.root_rot * 3.14 / 180 * self.config.noise_to_initial_level
-            root_vel_noise = self.config.init_noise_scale.root_vel * self.config.noise_to_initial_level
-            root_ang_vel_noise = self.config.init_noise_scale.root_ang_vel * self.config.noise_to_initial_level
+            # root_pos_noise = self.config.init_noise_scale.root_pos * self.config.noise_to_initial_level
+            # root_rot_noise = self.config.init_noise_scale.root_rot * 3.14 / 180 * self.config.noise_to_initial_level
+            # root_vel_noise = self.config.init_noise_scale.root_vel * self.config.noise_to_initial_level
+            # root_ang_vel_noise = self.config.init_noise_scale.root_ang_vel * self.config.noise_to_initial_level
+            root_pos_noise = 0
+            root_rot_noise = 0            
+            root_vel_noise = 0
+            root_ang_vel_noise = 0
+
+            
+            
 
             root_pos = motion_res['root_pos'][env_ids]
             root_rot = motion_res['root_rot'][env_ids]
@@ -525,6 +534,11 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                 raise NotImplementedError
             self.simulator.robot_root_states[env_ids, 7:10] = root_vel + torch.randn_like(root_vel) * root_vel_noise
             self.simulator.robot_root_states[env_ids, 10:13] = root_ang_vel + torch.randn_like(root_ang_vel) * root_ang_vel_noise
+            
+            print(f"Root Pos: {self.simulator.robot_root_states[env_ids, :3]}")
+            print(f"Root Rot: {self.simulator.robot_root_states[env_ids, 3:7]}")
+            print(f"Root Vel: {self.simulator.robot_root_states[env_ids, 7:10]}")
+            print(f"Root Ang Vel: {self.simulator.robot_root_states[env_ids, 10:13]}")
 
     def small_random_quaternions(self, n, max_angle):
             """生成小角度的随机偏转四元数（用于加噪声）"""
@@ -552,8 +566,14 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         dof_pos = motion_res['dof_pos'][env_ids]
         dof_vel = motion_res['dof_vel'][env_ids]
         # 强制复写电机角度和速度，完成重生
-        self.simulator.dof_pos[env_ids] = dof_pos + torch.randn_like(dof_pos) * dof_pos_noise
-        self.simulator.dof_vel[env_ids] = dof_vel + torch.randn_like(dof_vel) * dof_vel_noise
+        # self.simulator.dof_pos[env_ids] = dof_pos + torch.randn_like(dof_pos) * dof_pos_noise
+        # self.simulator.dof_vel[env_ids] = dof_vel + torch.randn_like(dof_vel) * dof_vel_noise
+        self.simulator.dof_pos[env_ids] = dof_pos 
+        self.simulator.dof_vel[env_ids] = dof_vel 
+        print(f"Dof Pos: {self.simulator.dof_pos[env_ids]}")
+        print(f"Dof Vel: {self.simulator.dof_vel[env_ids]}")
+
+
 
     def _post_physics_step__old_disabled(self):
         """

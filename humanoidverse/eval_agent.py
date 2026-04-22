@@ -20,6 +20,41 @@ from loguru import logger # 一个非常好用的彩色日志库
 import threading # 引入多线程。为了在机器人仿真的同时监听键盘输入，必须开新线程，否则会卡死仿真主循环
 # from pynput import keyboard # pynput用于捕获键盘按键（注释掉了可能在其他地方导入了）
 
+import os
+import random
+import numpy as np
+# import torch
+
+def set_seed(seed=42):
+    """
+    固定所有常见的随机数种子，以确保实验的可重复性。
+    """
+    # 1. 操作系统级别的随机性（影响哈希等）
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    
+    # 2. Python 内置的 random 模块
+    random.seed(seed)
+    
+    # 3. NumPy
+    np.random.seed(seed)
+    
+    # 4. PyTorch
+    torch.manual_seed(seed)
+    
+    # 5. 如果你使用了 GPU (CUDA)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)  # 如果有多个 GPU
+        
+        # 针对 cuDNN 的额外设置，确保每次计算过程一致
+        # 注意：这可能会稍微降低一点训练速度
+        torch.backends.cudnn.deterministic = True 
+        torch.backends.cudnn.benchmark = False
+
+# 在 main.py 或训练脚本最开头调用
+# set_seed(42)
+
+
 # ============================================================================
 # 函数 1: on_press
 # ============================================================================
@@ -91,6 +126,8 @@ def listen_for_keypress(env):
 # @hydra.main 装饰器：指定默认配置文件夹为 "config"，默认配置文件为 "base_eval.yaml"
 @hydra.main(config_path="config", config_name="base_eval", version_base="1.2")
 def main(override_config: OmegaConf):
+    
+    # set_seed(42)
     
     # ---------------- 1. 日志系统初始化 ----------------
     # logging to hydra log file: 将日志写到 hydra 自动生成的运行目录下的 eval.log 中
@@ -255,7 +292,7 @@ def main(override_config: OmegaConf):
 
     # 将只包含推理逻辑的 Actor 网络（脱离训练引擎）打包导出
     if EXPORT_POLICY:
-        export_policy_as_jit(algo.alg.actor_critic, exported_policy_path, exported_policy_name)
+        # export_policy_as_jit(algo.alg.actor_critic, exported_policy_path, exported_policy_name)
         logger.info('Exported policy as jit script to: ', os.path.join(exported_policy_path, exported_policy_name))
         
     if EXPORT_ONNX:
@@ -272,17 +309,17 @@ def main(override_config: OmegaConf):
     # ---------------- 8. 启动死循环，开始评估 ----------------
     # 进入仿真的主循环：不断收集环境观测值 -> 神经网络输出关节命令 -> 环境执行命令步进仿真
     
-    #algo.evaluate_policy()
+    algo.evaluate_policy()
     #algo.collect_delta_a_sim_data()
-    algo.evaluate_policy_for_mpjpe(
-        pkl_path=config.get("mpjpe_eval_pkl_path", None),
-        motion_keys=config.get("mpjpe_eval_motion_keys", None),
-        max_steps=config.get("mpjpe_eval_max_steps", None),
-        fallback_env_id=config.get("mpjpe_eval_fallback_env_id", 0),
-        csv_path=config.get("mpjpe_eval_csv_path", None),
-        step_csv_path=config.get("mpjpe_eval_step_csv_path", None),
-        use_deltaa_compensation=config.get("mpjpe_eval_use_deltaa_compensation", True),
-    )
+    # algo.evaluate_policy_for_mpjpe(
+    #     pkl_path=config.get("mpjpe_eval_pkl_path", None),
+    #     motion_keys=config.get("mpjpe_eval_motion_keys", None),
+    #     max_steps=config.get("mpjpe_eval_max_steps", None),
+    #     fallback_env_id=config.get("mpjpe_eval_fallback_env_id", 0),
+    #     csv_path=config.get("mpjpe_eval_csv_path", None),
+    #     step_csv_path=config.get("mpjpe_eval_step_csv_path", None),
+    #     use_deltaa_compensation=config.get("mpjpe_eval_use_deltaa_compensation", True),
+    # )
 
 # 标准 python 执行入口
 if __name__ == "__main__":

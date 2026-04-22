@@ -305,7 +305,9 @@ class LeggedRobotBase(BaseTask):
         # 2. 调用物理引擎步进计算
         #self._physics_step()
         # 3. 物理计算后的收尾，包括计算奖励和准备下一帧的观测
-        self._post_physics_step()
+        #self._post_physics_step()
+        self._post_physics_step_for_reset_all()
+
 
         # if self.episode_length_buf[0] == 1:
         #     import ipdb; ipdb.set_trace() # 调试用的断点
@@ -360,7 +362,7 @@ class LeggedRobotBase(BaseTask):
     """
     def _post_physics_step(self):
         self._refresh_sim_tensors() # 从仿真器底层拉取最新的所有物理状态张量
-        self.episode_length_buf += 1 # 存活步数加一
+        self.episode_length_buf += 1 # 存活步数加一。在一步后加一。
         # update counters
         self._update_counters_each_step()
         self.last_episode_length_buf = self.episode_length_buf.clone()
@@ -382,7 +384,10 @@ class LeggedRobotBase(BaseTask):
             # 对于重置的机器，把最新的（被拉回原点的）坐标强制塞进底层物理引擎
             self.simulator.set_actor_root_state_tensor(refresh_env_ids, self.simulator.all_root_states)
             self.simulator.set_dof_state_tensor(refresh_env_ids, self.simulator.dof_state)
-            self.need_to_refresh_envs[refresh_env_ids] = False
+            # self.need_to_refresh_envs[refresh_env_ids] = False
+            
+        self._refresh_sim_tensors() # 从仿真器底层拉取最新的所有物理状态张量
+        self._pre_compute_observations_callback() # 在算观测前做一些坐标系转换的准备工作
 
         self._compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
         # 获取最新的观测向量 (计算 Obs)
@@ -403,9 +408,83 @@ class LeggedRobotBase(BaseTask):
             self._setup_simulator_next_task()
             if self.debug_viz:
                 self._draw_debug_vis()
-    
-    
-        """
+                
+        # if len(refresh_env_ids) > 0:
+        #     for obs_key, obs_val in self.obs_buf_dict.items():#obs_buf_dict是按照字母顺序排列好的观测值字典，2个键是actor_obs和critic_obs,2个值是对应的观测张量列表
+        #         # self.obs_buf_dict[obs_key] = torch.clip(obs_val, -clip_obs, clip_obs) # 同样限制观测值的极值防爆
+        #         print(obs_key, obs_val)
+
+            # for key in self.history_handler.history.keys():
+                # self.history_handler.add(key, self.hist_obs_dict[key]) # 将当前状态hist_obs_dict(加噪且放缩过的这一期的观测值)推入历史序列，供未来使用
+                # print(key, self.hist_obs_dict[key])
+        self.need_to_refresh_envs[refresh_env_ids] = False
+
+    """
+    【函数作用】：这一大步结束后，统计分数、看看谁摔倒了、给摔倒的复活。因为reset_all时不想让机器人先被物理引擎演进一步再算奖励和观测，所以唯一注释了self.episode_length_buf += 1这一行。
+    【被谁调用】：step_for_reset_all（这是在 reset_all 时调用的版本，区别在于它不会调用物理引擎步进，所以机器人会直接从初始位置开始通过决策输出动作，而不是先让物理引擎演进一步再算奖励和观测）
+    """
+    def _post_physics_step_for_reset_all(self):
+        self._refresh_sim_tensors() # 从仿真器底层拉取最新的所有物理状态张量
+        #self.episode_length_buf += 1 # 存活步数加一。在一步后加一。
+        # update counters
+        self._update_counters_each_step()
+        self.last_episode_length_buf = self.episode_length_buf.clone()
+
+        self._pre_compute_observations_callback() # 在算观测前做一些坐标系转换的准备工作
+        self._update_tasks_callback() # 处理特定的环境任务（比如此时是否需要推一下机器人）
+        
+        # compute observations, rewards, resets, ...
+        self._check_termination() # 检查有没有机器人摔倒/超时了 (计算 Done)
+        self._compute_reward() # 结算这步的奖励 (计算 Reward)
+        
+        # check terminations
+        env_ids = self.reset_buf.nonzero(as_tuple=False).flatten() # 捞出所有被判死刑的环境 ID
+        self.reset_envs_idx(env_ids) # 真正去重置它们的参数位置
+
+        # set envs
+        refresh_env_ids = self.need_to_refresh_envs.nonzero(as_tuple=False).flatten()
+        if len(refresh_env_ids) > 0:
+            # 对于重置的机器，把最新的（被拉回原点的）坐标强制塞进底层物理引擎
+            self.simulator.set_actor_root_state_tensor(refresh_env_ids, self.simulator.all_root_states)
+            self.simulator.set_dof_state_tensor(refresh_env_ids, self.simulator.dof_state)
+            # self.need_to_refresh_envs[refresh_env_ids] = False
+            
+        self._refresh_sim_tensors() # 从仿真器底层拉取最新的所有物理状态张量
+        self._pre_compute_observations_callback() # 在算观测前做一些坐标系转换的准备工作
+
+        self._compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
+        # 获取最新的观测向量 (计算 Obs)
+        
+        self._post_compute_observations_callback()
+
+        # return clipped obs, clipped states (None), rewards, dones and infos
+        clip_obs = self.config.normalization.clip_observations
+        for obs_key, obs_val in self.obs_buf_dict.items():#obs_buf_dict是按照字母顺序排列好的观测值字典，2个键是actor_obs和critic_obs,2个值是对应的观测张量列表
+            self.obs_buf_dict[obs_key] = torch.clip(obs_val, -clip_obs, clip_obs) # 同样限制观测值的极值防爆
+
+        for key in self.history_handler.history.keys():
+            self.history_handler.add(key, self.hist_obs_dict[key]) # 将当前状态hist_obs_dict(加噪且放缩过的这一期的观测值)推入历史序列，供未来使用
+
+        self.extras["to_log"] = self.log_dict
+        if self.viewer:
+            self._setup_simulator_control()
+            self._setup_simulator_next_task()
+            if self.debug_viz:
+                self._draw_debug_vis()
+                
+        # if len(refresh_env_ids) > 0:
+        #     for obs_key, obs_val in self.obs_buf_dict.items():#obs_buf_dict是按照字母顺序排列好的观测值字典，2个键是actor_obs和critic_obs,2个值是对应的观测张量列表
+        #         # self.obs_buf_dict[obs_key] = torch.clip(obs_val, -clip_obs, clip_obs) # 同样限制观测值的极值防爆
+        #         print(obs_key, obs_val)
+
+            # for key in self.history_handler.history.keys():
+                # self.history_handler.add(key, self.hist_obs_dict[key]) # 将当前状态hist_obs_dict(加噪且放缩过的这一期的观测值)推入历史序列，供未来使用
+                # print(key, self.hist_obs_dict[key])
+        self.need_to_refresh_envs[refresh_env_ids] = False
+
+
+
+    """
     【函数作用】：从_post_physics_step修改而来，获取用于 MPJPE 评估时delta-a模型的观测数据
     【被谁调用】：evaluate_policy_for_mpjpe
     """
@@ -613,7 +692,7 @@ class LeggedRobotBase(BaseTask):
         if len(env_ids) == 0:
             return
         self.need_to_refresh_envs[env_ids] = True#在CPU修改了状态，需要同步刷新到GPU的环境
-        self._reset_buffers_callback(env_ids, target_buf) # 清空旧数据：actions，上一步动作，延迟后动作，上一步速度，足端腾空时间等等
+        self._reset_buffers_callback(env_ids, target_buf) # 清空旧数据：重力投影，参考相位等不会清空（等下一轮计算obs自动赋值，但这会影响接下来一步动作的输出）。等actions，上一步动作，延迟后动作，上一步速度，足端腾空时间等等。
         self._reset_tasks_callback(env_ids)        #包含动作起始点的选择（这个函数在motion_tracking.py的_reset_tasks_callback中包含，直接点进去是其父类），域随机化，惩罚项系数，关节物理限制系数，观测噪声系数。 if target_states is not None, reset to target states # 随机出新的物理难度(与奖励的计算标准有关)。域随机化，惩罚项系数，关节物理限制系数，观测噪声系数。
         self._reset_robot_states_callback(env_ids, target_states) # 从配置读取各关节和根状态的值，并给关节位置和根节点速度加一点随机化。把他丢回出生点.
 
@@ -829,6 +908,12 @@ class LeggedRobotBase(BaseTask):
             obs_keys = sorted(obs_config) # 强制按照字母顺序排列 key，防止不同时候拼出来的特征顺序乱掉导致网络瞎掉
             # print("obs_keys", obs_keys)            
             self.obs_buf_dict[obs_key] = torch.cat([self.obs_buf_dict_raw[obs_key][key] for key in obs_keys], dim=-1) # 沿着最后一维（特征维）拼接
+            
+            refresh_env_ids = self.need_to_refresh_envs.nonzero(as_tuple=False).flatten()
+            if len(refresh_env_ids) > 0:
+                for key in obs_keys:
+                    print(f"{key}: {self.obs_buf_dict_raw[obs_key][key]}")
+
     
     """
     【函数作用】：PD 伺服控制器方程的底层实现，将期望值转换为实际驱动力矩。
