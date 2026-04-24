@@ -427,10 +427,13 @@ class LeggedRobotBase(BaseTask):
         self._refresh_sim_tensors() # 从仿真器底层拉取最新的所有物理状态张量
         #self.episode_length_buf += 1 # 存活步数加一。在一步后加一。
         # update counters
-        self._update_counters_each_step()
+        # self._update_counters_each_step()
         self.last_episode_length_buf = self.episode_length_buf.clone()
 
+        
+        # print(f"_pre_compute_observations_callback前的self.simulator.all_root_states: {self.simulator.all_root_states}")
         self._pre_compute_observations_callback() # 在算观测前做一些坐标系转换的准备工作
+        # print(f"_pre_compute_observations_callback后的self.simulator.all_root_states: {self.simulator.all_root_states}")
         self._update_tasks_callback() # 处理特定的环境任务（比如此时是否需要推一下机器人）
         
         # compute observations, rewards, resets, ...
@@ -557,6 +560,7 @@ class LeggedRobotBase(BaseTask):
         # print("self.base_lin_vel", self.base_lin_vel)
         # 计算局部角速度
         self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.simulator.robot_root_states[:, 10:13])
+        print(f"旋转后的self.base_ang_vel: {self.base_ang_vel}")
         # print("self.base_ang_vel", self.base_ang_vel)
         # 投影重力向量（完美反映了机器人目前的俯仰和侧倾角度）
         self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
@@ -911,10 +915,10 @@ class LeggedRobotBase(BaseTask):
             # print("obs_keys", obs_keys)            
             self.obs_buf_dict[obs_key] = torch.cat([self.obs_buf_dict_raw[obs_key][key] for key in obs_keys], dim=-1) # 沿着最后一维（特征维）拼接
             
-            # refresh_env_ids = self.need_to_refresh_envs.nonzero(as_tuple=False).flatten()
-            # if len(refresh_env_ids) > 0:
-            #     for key in obs_keys:
-            #         print(f"{key}: {self.obs_buf_dict_raw[obs_key][key]}")
+            refresh_env_ids = self.need_to_refresh_envs.nonzero(as_tuple=False).flatten()
+            if len(refresh_env_ids) > 0:
+                for key in obs_keys:
+                    print(f"{key}: {self.obs_buf_dict_raw[obs_key][key]}")
 
     
     """

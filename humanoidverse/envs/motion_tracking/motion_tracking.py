@@ -537,10 +537,10 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             self.simulator.robot_root_states[env_ids, 7:10] = root_vel + torch.randn_like(root_vel) * root_vel_noise
             self.simulator.robot_root_states[env_ids, 10:13] = root_ang_vel + torch.randn_like(root_ang_vel) * root_ang_vel_noise
             
-            print(f"_reset_root_states中读取仿真器的self.simulator.robot_root_states[env_ids, :3]: {self.simulator.robot_root_states[env_ids, :3]}")
-            print(f"_reset_root_states中读取仿真器的self.simulator.robot_root_states[env_ids, 3:7]: {self.simulator.robot_root_states[env_ids, 3:7]}")
-            print(f"_reset_root_states中读取仿真器的self.simulator.robot_root_states[env_ids, 7:10]: {self.simulator.robot_root_states[env_ids, 7:10]}")
-            print(f"_reset_root_states中读取仿真器的self.simulator.robot_root_states[env_ids, 10:13]: {self.simulator.robot_root_states[env_ids, 10:13]}")
+            # print(f"_reset_root_states中读取仿真器的self.simulator.robot_root_states[env_ids, :3]: {self.simulator.robot_root_states[env_ids, :3]}")
+            # print(f"_reset_root_states中读取仿真器的self.simulator.robot_root_states[env_ids, 3:7]: {self.simulator.robot_root_states[env_ids, 3:7]}")
+            # print(f"_reset_root_states中读取仿真器的self.simulator.robot_root_states[env_ids, 7:10]: {self.simulator.robot_root_states[env_ids, 7:10]}")
+            # print(f"_reset_root_states中读取仿真器的self.simulator.robot_root_states[env_ids, 10:13]: {self.simulator.robot_root_states[env_ids, 10:13]}")
 
     def small_random_quaternions(self, n, max_angle):
             """生成小角度的随机偏转四元数（用于加噪声）"""
@@ -563,17 +563,23 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         offset = self.env_origins
         motion_res = self._motion_lib.get_motion_state(self.motion_ids, motion_times, offset=offset)
 
+        print(f"读取动作库中状态{motion_res} = self._motion_lib.get_motion_state(动作编号，动作时刻，原点偏移）{self.motion_ids}, {motion_times}, {offset})")
+        
+        
         dof_pos_noise = self.config.init_noise_scale.dof_pos * self.config.noise_to_initial_level
         dof_vel_noise = self.config.init_noise_scale.dof_vel * self.config.noise_to_initial_level
         dof_pos = motion_res['dof_pos'][env_ids]
         dof_vel = motion_res['dof_vel'][env_ids]
+        
+        print(f"动作库中读取的该动作当前时刻的关节速度: motion_res['dof_vel'][env_ids]={dof_vel}")
+        
         # 强制复写电机角度和速度，完成重生
         # self.simulator.dof_pos[env_ids] = dof_pos + torch.randn_like(dof_pos) * dof_pos_noise
         # self.simulator.dof_vel[env_ids] = dof_vel + torch.randn_like(dof_vel) * dof_vel_noise
         self.simulator.dof_pos[env_ids] = dof_pos 
         self.simulator.dof_vel[env_ids] = dof_vel 
-        print(f"reset_dof中读取仿真器中self.simulator.dof_pos[env_ids]: {self.simulator.dof_pos[env_ids]}")
-        print(f"reset_dof中读取仿真器中self.simulator.dof_vel[env_ids]: {self.simulator.dof_vel[env_ids]}")
+        # print(f"reset_dof中读取仿真器中self.simulator.dof_pos[env_ids]: {self.simulator.dof_pos[env_ids]}")
+        # print(f"reset_dof中读取仿真器中self.simulator.dof_vel[env_ids]: {self.simulator.dof_vel[env_ids]}")
 
 
 

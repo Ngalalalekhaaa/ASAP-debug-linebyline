@@ -465,6 +465,9 @@ class IsaacGym(BaseSimulator):
 
         self.gym.refresh_jacobian_tensors(self.sim)
         self.gym.refresh_mass_matrix_tensors(self.sim)
+        
+        # print(f"isaacgym.py中用refresh_sim_tensors刚读取的根节点状态self.robot_root_states:{self.all_root_states}")
+
 
     def _get_num_actors_per_env(self):
         return self.all_root_states.shape[0] // self.num_envs
@@ -478,6 +481,10 @@ class IsaacGym(BaseSimulator):
 
     def set_actor_root_state_tensor(self, set_env_ids, root_states):
         set_env_ids_int32 = set_env_ids.to(torch.int32)
+        
+        
+        print(f"isaacgym.py中的根节点状态root_states:{root_states}，马上用api赋给真正仿真器")
+
         
         self.gym.set_actor_root_state_tensor_indexed(self.sim, 
                                                     gymtorch.unwrap_tensor(root_states), 

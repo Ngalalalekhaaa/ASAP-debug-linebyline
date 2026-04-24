@@ -180,6 +180,7 @@ class BaseTask():
         # 返回的是初始状态的观测，提供给策略网络进行第一次推理
         #for i in range(1000):
         obs_dict, _, _, _ = self.step_for_reset_all(actor_state)
+        print(1111111111111111111111111111111111111111111111111111)
         return obs_dict
         
         # self._compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
