@@ -605,6 +605,8 @@ class LeggedRobotBase(BaseTask):
 
         # 如果是被打死了，或者是寿终正寝（超时）了，在这一回合里都被记作“结束”（Done）
         self.reset_buf |= self.time_out_buf
+        #print(self.episode_sums["mpjpe"])
+        # print(self.episode_sums["teleop_body_position_extend"][self.reset_buf.bool()])
 
     """
     【函数作用】：判断机器人有没有因为摔倒或其他违规行为“死亡”（需要重置）。
@@ -909,10 +911,10 @@ class LeggedRobotBase(BaseTask):
             # print("obs_keys", obs_keys)            
             self.obs_buf_dict[obs_key] = torch.cat([self.obs_buf_dict_raw[obs_key][key] for key in obs_keys], dim=-1) # 沿着最后一维（特征维）拼接
             
-            refresh_env_ids = self.need_to_refresh_envs.nonzero(as_tuple=False).flatten()
-            if len(refresh_env_ids) > 0:
-                for key in obs_keys:
-                    print(f"{key}: {self.obs_buf_dict_raw[obs_key][key]}")
+            # refresh_env_ids = self.need_to_refresh_envs.nonzero(as_tuple=False).flatten()
+            # if len(refresh_env_ids) > 0:
+            #     for key in obs_keys:
+            #         print(f"{key}: {self.obs_buf_dict_raw[obs_key][key]}")
 
     
     """

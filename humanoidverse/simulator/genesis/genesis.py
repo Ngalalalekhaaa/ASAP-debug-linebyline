@@ -347,6 +347,11 @@ class Genesis(BaseSimulator):
         self.base_lin_vel = self.robot.get_vel()
         self.base_ang_vel = self.robot.get_ang()
 
+        print(f"genesis.py中在refresh_sim_tensor中使用api读取的根节点位置base_pos{self.base_pos}")
+        print(f"genesis.py中在refresh_sim_tensor中使用api读取的根节点角速度base_ang_vel{self.base_ang_vel}")
+
+
+
         # 拼接更新 13 维的 Root State 张量
         self.all_root_states = torch.cat(
             [
@@ -424,6 +429,9 @@ class Genesis(BaseSimulator):
         base_quat = root_states[..., [6, 3, 4, 5]]
         base_lin_vel = root_states[..., 7:10]
         base_ang_vel = root_states[..., 10:13]
+
+        print(f"genesis.py中的根节点位置base_pos{base_pos}，马上用api赋给真正仿真器")
+        print(f"genesis.py中的根节点角速度base_ang_vel{base_ang_vel}，马上用api赋给真正仿真器")
 
         # reset root states - position (调用底层方法重置)
         # zero_velocity=False 代表不仅设位置，连速度也要设过去（这在初始化抛掷机器人时很重要）
