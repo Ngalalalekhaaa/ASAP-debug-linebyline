@@ -609,7 +609,7 @@ class LeggedRobotBase(BaseTask):
 
         # 如果是被打死了，或者是寿终正寝（超时）了，在这一回合里都被记作“结束”（Done）
         self.reset_buf |= self.time_out_buf
-        #print(self.episode_sums["mpjpe"])
+        print(self.episode_sums["mpjpe"])
         # print(self.episode_sums["teleop_body_position_extend"][self.reset_buf.bool()])
 
     """

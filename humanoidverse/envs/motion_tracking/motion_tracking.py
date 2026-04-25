@@ -291,11 +291,11 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             return
         # 拿到这批动作的总长度
         self.motion_len[env_ids] = self._motion_lib.get_motion_length(self.motion_ids[env_ids])
-        print(f"重置动作的长度self.motion_len[env_ids]={self.motion_len[env_ids]}")
+        # print(f"重置动作的长度self.motion_len[env_ids]={self.motion_len[env_ids]}")
         # 如果是评估测试，一律从头 (0.0 秒) 开始播
         if self.is_evaluating and not self.config.enforce_randomize_motion_start_eval:
             self.motion_start_times[env_ids] = torch.zeros(len(env_ids), dtype=torch.float32, device=self.device)
-            print(f"动作起始时间self.motion_start_times[env_ids]={self.motion_start_times[env_ids]}")
+            # print(f"动作起始时间self.motion_start_times[env_ids]={self.motion_start_times[env_ids]}")
         else:
             # 如果是训练，随机抽一个时间点 (比如动画总长 3 秒，随机抽在 1.5 秒出生)
             self.motion_start_times[env_ids] = self._motion_lib.sample_time(self.motion_ids[env_ids])
@@ -980,7 +980,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         motion_res = self._motion_lib.get_motion_state(self.motion_ids, motion_times, offset=offset)
 
         # print(f"读取动作库中状态{motion_res} = self._motion_lib.get_motion_state(动作编号，动作时刻，原点偏移）{self.motion_ids}, {motion_times}, {offset})")
-        print(f"动作库初始动作motion_res：{motion_res}")
+        # print(f"动作库初始动作motion_res：{motion_res}")
     #     motion_res={'root_pos': torch.tensor([[ 0.0035, -0.2307,  0.9065]], device='cuda:0'), 'root_rot': torch.tensor([[-0.1065, -0.0585,  0.7433, -0.6578]], device='cuda:0'), 'dof_pos': torch.tensor([[-0.1040,  0.0146,  0.2722,  0.0424,  0.0014,  0.0000, -0.2361, -0.1315,
     #      -0.0481,  0.0927,  0.0043,  0.0000,  0.2081, -0.0671, -0.2738,  0.2576,
     #       0.3911, -0.4247,  0.9946,  0.2217, -0.3084,  0.2673,  0.9876]],
@@ -1194,7 +1194,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         dof_pos = motion_res['dof_pos'][env_ids]
         dof_vel = motion_res['dof_vel'][env_ids]
         
-        print(f"动作库中读取的该动作当前时刻的关节速度: motion_res['dof_vel'][env_ids]={dof_vel}")
+        # print(f"动作库中读取的该动作当前时刻的关节速度: motion_res['dof_vel'][env_ids]={dof_vel}")
         
         # 强制复写电机角度和速度，完成重生
         # self.simulator.dof_pos[env_ids] = dof_pos + torch.randn_like(dof_pos) * dof_pos_noise

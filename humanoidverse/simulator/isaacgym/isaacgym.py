@@ -483,7 +483,7 @@ class IsaacGym(BaseSimulator):
         set_env_ids_int32 = set_env_ids.to(torch.int32)
         
         
-        print(f"isaacgym.py中的根节点状态root_states:{root_states}，马上用api赋给真正仿真器")
+        # print(f"isaacgym.py中的根节点状态root_states:{root_states}，马上用api赋给真正仿真器")
 
         
         self.gym.set_actor_root_state_tensor_indexed(self.sim, 
