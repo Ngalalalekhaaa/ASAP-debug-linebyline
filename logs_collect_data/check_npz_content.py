@@ -127,7 +127,7 @@ HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
 +checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt \
 +simulator=genesis \
 +env.config.save_motion=True \
-+env.config.save_note=test_withoutresetallbeforeseteval_mtnum1 \
++env.config.save_note=test2_mtnum1_printresetindicator \
 +env.config.eval_timestamp=$(date +%Y%m%d_%H%M%S) \
 +rewards.reward_scales.mpjpe=1
 
@@ -164,12 +164,13 @@ python logs_collect_data/replay_motion_in_sim.py \
 # robot.motion.motion_file=mpjpe_eval_pkl_path
 
 HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
-+robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/test_withoutresetallbeforeseteval_mtnum1_20260424105728.pkl" \
++robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/test3_mtnum1_add_postphysstepsforresetall_son_20260424175110.pkl" \
 +checkpoint="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt" \
 +rewards.reward_scales.mpjpe=1
 
 +robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/test_withoutresetallbeforeseteval_mtnum1_20260424105728.pkl" \
 +robot.motion.motion_file="humanoidverse/data/motions/g1_29dof_anneal_23dof/TairanTestbed/singles/0-TairanTestbed_TairanTestbed_CR7_video_CR7_level1_filter_amass.pkl" \
++robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/test3_mtnum1_add_postphysstepsforresetall_son_20260424175110.pkl" \
 
  
     

@@ -118,7 +118,7 @@ def main(config: OmegaConf):
         OmegaConf.save(unresolved_conf, file)#实验目录下的config.yaml文件（外层的，不是.hydra文件夹下的）
 
     algo: BaseAlgo = instantiate(device=device, env=env, config=config.algo, log_dir=experiment_save_dir)
-    algo.setup()
+    algo.setup()#构建网络和优化器
     # import ipdb;    ipdb.set_trace()
     if config.checkpoint is not None:
         algo.load(config.checkpoint)

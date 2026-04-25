@@ -1,10 +1,10 @@
 # @package _global_
 
 algo:
-  _target_: humanoidverse.agents.delta_a.train_delta_a.PPODeltaA
+  _target_: humanoidverse.agents.delta_a.train_delta_a.PPODeltaA #与开环区别
   _recursive_: False
   config:
-    policy_checkpoint: null
+    policy_checkpoint: null #与开环区别
     num_learning_epochs: 5
     num_mini_batches: 4
     clip_param: 0.2

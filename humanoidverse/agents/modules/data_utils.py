@@ -45,7 +45,7 @@ class RolloutStorage(nn.Module):
             (self.num_transitions_per_env, self.num_envs) + shape, dtype=dtype, device=self.device
         )
         self.register_buffer(key, buffer, persistent=False)
-        self.stored_keys.append(key)
+        self.stored_keys.append(key)#stored_keys是一个列表，记录了Rollout中要存的键的名字
     
     def increment_step(self):
         self.step += 1
@@ -99,7 +99,7 @@ class RolloutStorage(nn.Module):
     def mini_batch_generator(self, num_mini_batches, num_epochs=8):
         batch_size = self.num_envs * self.num_transitions_per_env
         mini_batch_size = batch_size // num_mini_batches
-        indices = torch.randperm(num_mini_batches*mini_batch_size, requires_grad=False, device=self.device)
+        indices = torch.randperm(num_mini_batches*mini_batch_size, requires_grad=False, device=self.device)#torch.randperm() 是 PyTorch 中用于生成 0 到 n-1 之间整数的随机排列 的函数。它返回一个长度为 n 的一维张量（Tensor），其中包含从 0 到 n-1 的所有整数，但顺序是随机打乱的。
         
         _buffer_dict = {key: getattr(self, key)[:].flatten(0, 1) for key in self.stored_keys}
 
