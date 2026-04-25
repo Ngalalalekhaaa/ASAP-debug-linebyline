@@ -259,6 +259,12 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             if not skip_motion_far_for_saving:
                 self.reset_buf |= reset_buf_motion_far # 管道合并：把动作跟丢标记加入总重置标志中
             
+            
+        if self.reset_buf.sum() > 0:
+            # print(self.reset_buf)
+            print("全部self.episode_sums['mpjpe']取值:", self.episode_sums["mpjpe"])
+            print("self.episode_sums['mpjpe']的平均值:", self.episode_sums["mpjpe"].mean())
+
             # 把当前的容忍度记录下来画图表
             if self.config.termination_curriculum.terminate_when_motion_far_curriculum:
                 self.log_dict["terminate_when_motion_far_threshold"] = torch.tensor(self.terminate_when_motion_far_threshold, dtype=torch.float)
@@ -1388,7 +1394,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         # 当前时刻快照（CPU），供按 env 切分记录
         # 根平移位置（x,y,z）拷贝到 CPU，后续逐 env append。
         root_trans = self.simulator.robot_root_states[:, 0:3].cpu()
-        print(f"写入.pkl的root_trans:{root_trans}")
+        # print(f"写入.pkl的root_trans:{root_trans}")
         # 按 simulator 后端提取根四元数字段（不同后端四元数布局可能不同）。
         if self.config.simulator.config.name == "isaacgym":
             # IsaacGym 使用 [x,y,z,w] 存在 3:7。
@@ -1717,7 +1723,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         # 当前时刻快照（CPU），供按 env 切分记录
         # 根平移位置（x,y,z）拷贝到 CPU，后续逐 env append。
         root_trans = self.simulator.robot_root_states[:, 0:3].cpu()
-        print(f"写入.pkl的root_trans:{root_trans}")
+        # print(f"写入.pkl的root_trans:{root_trans}")
         # 按 simulator 后端提取根四元数字段（不同后端四元数布局可能不同）。
         if self.config.simulator.config.name == "isaacgym":
             # IsaacGym 使用 [x,y,z,w] 存在 3:7。

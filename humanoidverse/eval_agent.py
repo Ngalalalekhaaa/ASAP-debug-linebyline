@@ -270,7 +270,7 @@ def main(override_config: OmegaConf):
 
     # ---------------- 7. 模型导出部署阶段 (Sim2Real 必备) ----------------
     EXPORT_POLICY = False # 是否导出为 TorchScript JIT 格式
-    EXPORT_ONNX = True # 是否导出为 ONNX 格式（主流的跨平台、跨语言推理框架）
+    EXPORT_ONNX = False # 是否导出为 ONNX 格式（主流的跨平台、跨语言推理框架）
 
     # 当启用 save_motion 采集时，导出 ONNX 会触发一次额外 reset_all（get_example_obs），
     # 可能污染“首生命”采样统计，因此默认跳过导出。
