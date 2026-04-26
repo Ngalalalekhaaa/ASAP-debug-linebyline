@@ -1336,6 +1336,9 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                 recent_length_mean = float(np.mean(recent_lengths)) if len(recent_lengths) > 0 else 0.0
                 total_finished = len(self._eval_completed_returns)
 
+                
+
+
                 # 控制台打印：每个结束回合输出一行摘要 + 最近20回合均值。
                 print(colored(
                     f"[eval-return] env={env_idx} ep={ep_idx} done={done_type} len={ep_length} return={ep_return:.6f} | "

@@ -301,7 +301,7 @@ class LeggedRobotBase(BaseTask):
         # actions *= 0.0 # 调试用代码：强制动作归零以观察机器人自由落体状态
         
         # 1. 发送给物理引擎前的预处理
-        self._pre_physics_step(actions)
+        # self._pre_physics_step(actions)
         # 2. 调用物理引擎步进计算
         #self._physics_step()
         # 3. 物理计算后的收尾，包括计算奖励和准备下一帧的观测
@@ -424,33 +424,33 @@ class LeggedRobotBase(BaseTask):
     【被谁调用】：step_for_reset_all（这是在 reset_all 时调用的版本，区别在于它不会调用物理引擎步进，所以机器人会直接从初始位置开始通过决策输出动作，而不是先让物理引擎演进一步再算奖励和观测）
     """
     def _post_physics_step_for_reset_all(self):
-        self._refresh_sim_tensors() # 从仿真器底层拉取最新的所有物理状态张量
+        # self._refresh_sim_tensors() # 从仿真器底层拉取最新的所有物理状态张量
         #self.episode_length_buf += 1 # 存活步数加一。在一步后加一。
         # update counters
         # self._update_counters_each_step()
-        self.last_episode_length_buf = self.episode_length_buf.clone()
+        # self.last_episode_length_buf = self.episode_length_buf.clone()
 
         
         # print(f"_pre_compute_observations_callback前的self.simulator.all_root_states: {self.simulator.all_root_states}")
-        self._pre_compute_observations_callback() # 在算观测前做一些坐标系转换的准备工作
+        # self._pre_compute_observations_callback() # 在算观测前做一些坐标系转换的准备工作
         # print(f"_pre_compute_observations_callback后的self.simulator.all_root_states: {self.simulator.all_root_states}")
-        self._update_tasks_callback() # 处理特定的环境任务（比如此时是否需要推一下机器人）
+        # self._update_tasks_callback() # 处理特定的环境任务（比如此时是否需要推一下机器人）
         
         # compute observations, rewards, resets, ...
-        self._check_termination() # 检查有没有机器人摔倒/超时了 (计算 Done)
-        self._compute_reward() # 结算这步的奖励 (计算 Reward)
+        # self._check_termination() # 检查有没有机器人摔倒/超时了 (计算 Done)
+        # # self._compute_reward() # 结算这步的奖励 (计算 Reward)
         
-        # check terminations
-        env_ids = self.reset_buf.nonzero(as_tuple=False).flatten() # 捞出所有被判死刑的环境 ID
-        self.reset_envs_idx(env_ids) # 真正去重置它们的参数位置
+        # # check terminations
+        # env_ids = self.reset_buf.nonzero(as_tuple=False).flatten() # 捞出所有被判死刑的环境 ID
+        # self.reset_envs_idx(env_ids) # 真正去重置它们的参数位置
 
-        # set envs
-        refresh_env_ids = self.need_to_refresh_envs.nonzero(as_tuple=False).flatten()
-        if len(refresh_env_ids) > 0:
-            # 对于重置的机器，把最新的（被拉回原点的）坐标强制塞进底层物理引擎
-            self.simulator.set_actor_root_state_tensor(refresh_env_ids, self.simulator.all_root_states)
-            self.simulator.set_dof_state_tensor(refresh_env_ids, self.simulator.dof_state)
-            # self.need_to_refresh_envs[refresh_env_ids] = False
+        # # set envs
+        refresh_env_ids = self.need_to_refresh_envs.nonzero(as_tuple=False).flatten()#思路就是给reset_all的重置创造和循环中reset一模一样的条件，这句需要保留是因为最后一行要专门赋值为False，否则进入循环中的紧下面几行会将已经经过一步错当作初始状态重新赋值给仿真器。模型第一步会倒就是因为_post_physics_step_for_reset_all最后一行错误地注释掉了，实际不能注释
+        # if len(refresh_env_ids) > 0:
+        #     # 对于重置的机器，把最新的（被拉回原点的）坐标强制塞进底层物理引擎
+        #     self.simulator.set_actor_root_state_tensor(refresh_env_ids, self.simulator.all_root_states)
+        #     self.simulator.set_dof_state_tensor(refresh_env_ids, self.simulator.dof_state)
+        #     # self.need_to_refresh_envs[refresh_env_ids] = False
             
         self._refresh_sim_tensors() # 从仿真器底层拉取最新的所有物理状态张量
         self._pre_compute_observations_callback() # 在算观测前做一些坐标系转换的准备工作
@@ -483,7 +483,7 @@ class LeggedRobotBase(BaseTask):
             # for key in self.history_handler.history.keys():
                 # self.history_handler.add(key, self.hist_obs_dict[key]) # 将当前状态hist_obs_dict(加噪且放缩过的这一期的观测值)推入历史序列，供未来使用
                 # print(key, self.hist_obs_dict[key])
-        self.need_to_refresh_envs[refresh_env_ids] = False
+        self.need_to_refresh_envs[refresh_env_ids] = False#这句不能注释掉，否则进入循环中的紧下面几行会将已经经过一步错当作初始状态重新赋值给仿真器。模型第一步会倒就是因为这句错误地注释掉了，实际不能注释
 
 
 
@@ -697,6 +697,11 @@ class LeggedRobotBase(BaseTask):
         """
         if len(env_ids) == 0:
             return
+        
+        for i in range(len(self.reward_functions)):
+                    name = self.reward_names[i]#reward_names[i]和reward_functions[i]是一一对应的，都是按照配置中reward_scales里非零的奖励项顺序排列的。reward_names[i]是字符串名字，reward_functions[i]是函数指针。
+                    print(f"各项累计奖励：{name}:{self.episode_sums[name]}")
+        
         self.need_to_refresh_envs[env_ids] = True#在CPU修改了状态，需要同步刷新到GPU的环境
         self._reset_buffers_callback(env_ids, target_buf) # 清空旧数据：重力投影，参考相位等不会清空（等下一轮计算obs自动赋值，但这会影响接下来一步动作的输出）。等actions，上一步动作，延迟后动作，上一步速度，足端腾空时间等等。
         self._reset_tasks_callback(env_ids)        #包含动作起始点的选择（这个函数在motion_tracking.py的_reset_tasks_callback中包含，直接点进去是其父类），域随机化，惩罚项系数，关节物理限制系数，观测噪声系数。 if target_states is not None, reset to target states # 随机出新的物理难度(与奖励的计算标准有关)。域随机化，惩罚项系数，关节物理限制系数，观测噪声系数。
@@ -995,10 +1000,10 @@ class LeggedRobotBase(BaseTask):
     #    device='cuda:0')
                 # print(f"self.obs_buf_dict[obs_key]是：：：：：：：：：：：：：：：：：：：：：：：：：：：：：：：：：：：：：：：{obs_key}: {self.obs_buf_dict[obs_key]}")
             
-            refresh_env_ids = self.need_to_refresh_envs.nonzero(as_tuple=False).flatten()
-            if len(refresh_env_ids) > 0:
-                for key in obs_keys:
-                    print(f"{key}: {self.obs_buf_dict_raw[obs_key][key]}")
+            # refresh_env_ids = self.need_to_refresh_envs.nonzero(as_tuple=False).flatten()
+            # if len(refresh_env_ids) > 0:
+            #     for key in obs_keys:
+            #         print(f"{key}: {self.obs_buf_dict_raw[obs_key][key]}")
 
     
     """
