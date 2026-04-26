@@ -127,7 +127,7 @@ HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
 +checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt \
 +simulator=genesis \
 +env.config.save_motion=True \
-+env.config.save_note=test4_norand \
++env.config.save_note=test5_mtnum4_allsame \
 +env.config.eval_timestamp=$(date +%Y%m%d_%H%M%S) \
 +num_envs=4 \
 +rewards.reward_scales.mpjpe=1
@@ -165,7 +165,7 @@ python logs_collect_data/replay_motion_in_sim.py \
 # robot.motion.motion_file=mpjpe_eval_pkl_path
 
 HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
-+robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/test3_mtnum1_add_postphysstepsforresetall_son_20260424175110.pkl" \
++robot.motion.motion_file="humanoidverse/data/motions/g1_29dof_anneal_23dof/TairanTestbed/singles/0-TairanTestbed_TairanTestbed_CR7_video_CR7_level1_filter_amass.pkl" \
 +checkpoint="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt" \
 +rewards.reward_scales.mpjpe=1
 
@@ -188,7 +188,7 @@ HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
 python humanoidverse/eval_agent.py \
 +simulator=isaacgym \
 +exp=train_delta_a_closed_loop \
-algo.config.policy_checkpoint="logs/DeltaA_Training/20260412_102648-openloopDeltaA_training-delta_a-g1_29dof_anneal_23dof/model_10000.pt" \
+algo.config.policy_checkpoint="logs/DeltaA_Training/20260416_171312-after_20260413_204909_17300pt_penaltyMinimalAction0p5-check_stop_error_num3-g1_29dof_anneal_23dof/model_82900.pt" \
 +domain_rand=NO_domain_rand_finetune_with_deltaA \
 +rewards=motion_tracking/reward_motion_tracking_dm_simfinetuning \
 +robot=g1/g1_29dof_anneal_23dof \
@@ -197,14 +197,18 @@ algo.config.policy_checkpoint="logs/DeltaA_Training/20260412_102648-openloopDelt
 +num_envs=4 \
 +project_name=DeltaA_Finetune \
 experiment_name=finetune_with_deltaA \
-robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/test3_mtnum1_add_postphysstepsforresetall_son_20260424175110.pkl" \
-env.config.add_extra_action=False \
+robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/test5_mtnum4_allsame_20260426141944.pkl" \
 +checkpoint="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt" \
 domain_rand.push_robots=False \
 env.config.noise_to_initial_level=0 \
 rewards.reward_penalty_curriculum=True \
 +device=cuda:0 \
 env.config.termination.terminate_by_gravity=False \
-+rewards.reward_scales.mpjpe=1
++rewards.reward_scales.mpjpe=1 \
++headless=False \
+env.config.add_extra_action=True
 
 
+algo.config.policy_checkpoint="logs/DeltaA_Training/20260412_102648-openloopDeltaA_training-delta_a-g1_29dof_anneal_23dof/model_10000.pt" \
+algo.config.policy_checkpoint="logs/DeltaA_Training/20260413_204233-openloopDeltaA_training-delta_a-g1_29dof_anneal_23dof/model_50900.pt" \
+algo.config.policy_checkpoint="logs/DeltaA_Training/20260416_171312-after_20260413_204909_17300pt_penaltyMinimalAction0p5-check_stop_error_num3-g1_29dof_anneal_23dof/model_82900.pt" \

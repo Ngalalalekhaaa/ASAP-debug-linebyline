@@ -356,7 +356,7 @@ class DeltaA_ClosedLoop(LeggedRobotMotionTracking):
         # print('closed_loop_actions in env.step: ', actor_state['actions_closed_loop'])
         
         # 按顺序执行物理引擎的三部曲：
-        self._pre_physics_step(actions) # 1. 物理计算前置处理 (将动作转为扭矩送到仿真器，即调用上面的 _compute_torques)
+        # self._pre_physics_step(actions) # 1. 物理计算前置处理 (将动作转为扭矩送到仿真器，即调用上面的 _compute_torques)
         #self._physics_step()            # 2. 仿真器前向推演一步时间戳
         self._post_physics_step_for_reset_all()       # 3. 物理计算后处理 (计算奖励、检查跌倒、更新内部观测变量)
 
@@ -387,5 +387,5 @@ class DeltaA_ClosedLoop(LeggedRobotMotionTracking):
         actor_state["actions"] = actions
         actor_state["actions_closed_loop"] = actions_closed_loop
         # 用全 0 动作前向推演一帧，以刷新拿到干净的、重置后的第一帧观测数据 obs_dict
-        obs_dict, _, _, _ = self.step(actor_state)
+        obs_dict, _, _, _ = self.step_for_reset_all(actor_state)
         return obs_dict # 返回初始观测给算法

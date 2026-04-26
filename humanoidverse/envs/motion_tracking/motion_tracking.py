@@ -260,14 +260,14 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                 self.reset_buf |= reset_buf_motion_far # 管道合并：把动作跟丢标记加入总重置标志中
             
             
-        if self.reset_buf.sum() > 0:
-            # print(self.reset_buf)
-            print("全部self.episode_sums['mpjpe']取值:", self.episode_sums["mpjpe"])
-            print("self.episode_sums['mpjpe']的平均值:", self.episode_sums["mpjpe"].mean())
+        # if self.reset_buf.sum() > 0:
+        #     # print(self.reset_buf)
+        #     print("全部self.episode_sums['mpjpe']取值:", self.episode_sums["mpjpe"])
+        #     print("self.episode_sums['mpjpe']的平均值:", self.episode_sums["mpjpe"].mean())
 
-            # 把当前的容忍度记录下来画图表
-            if self.config.termination_curriculum.terminate_when_motion_far_curriculum:
-                self.log_dict["terminate_when_motion_far_threshold"] = torch.tensor(self.terminate_when_motion_far_threshold, dtype=torch.float)
+        # 把当前的容忍度记录下来画图表
+        if self.config.termination_curriculum.terminate_when_motion_far_curriculum:
+            self.log_dict["terminate_when_motion_far_threshold"] = torch.tensor(self.terminate_when_motion_far_threshold, dtype=torch.float)
 
     def _update_timeout_buf(self):
         """

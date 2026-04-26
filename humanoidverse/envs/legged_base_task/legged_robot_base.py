@@ -699,9 +699,13 @@ class LeggedRobotBase(BaseTask):
         if len(env_ids) == 0:
             return
         
-        for i in range(len(self.reward_functions)):
-                    name = self.reward_names[i]#reward_names[i]和reward_functions[i]是一一对应的，都是按照配置中reward_scales里非零的奖励项顺序排列的。reward_names[i]是字符串名字，reward_functions[i]是函数指针。
-                    print(f"各项累计奖励：{name}:{self.episode_sums[name]}")
+        
+        print("全部self.episode_sums['mpjpe']取值:", self.episode_sums["mpjpe"])
+        print("self.episode_sums['mpjpe']的平均值:", self.episode_sums["mpjpe"].mean())
+
+        # for i in range(len(self.reward_functions)):
+        #             name = self.reward_names[i]#reward_names[i]和reward_functions[i]是一一对应的，都是按照配置中reward_scales里非零的奖励项顺序排列的。reward_names[i]是字符串名字，reward_functions[i]是函数指针。
+        #             print(f"各项累计奖励：{name}:{self.episode_sums[name]}")
         
         self.need_to_refresh_envs[env_ids] = True#在CPU修改了状态，需要同步刷新到GPU的环境
         self._reset_buffers_callback(env_ids, target_buf) # 清空旧数据：重力投影，参考相位等不会清空（等下一轮计算obs自动赋值，但这会影响接下来一步动作的输出）。等actions，上一步动作，延迟后动作，上一步速度，足端腾空时间等等。
