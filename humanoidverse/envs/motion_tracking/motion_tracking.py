@@ -1677,7 +1677,7 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                 ))
 
                 # 清空该 env 当前 episode 缓存，开始下一回合统计。
-                self._eval_episode_returns[env_idx] = 0.0
+                self._eval_episode_returns[env_idx] = 0.0#reset_all中self.reset_buf是否置0只会，在这个判断条件只会影响打印，以及下一行self._eval_episode_step_rewards[env_idx]记录的每帧奖励，是否包含第一帧为0的这个值（第一帧为0,或从实际第2帧开始）
                 self._eval_episode_step_rewards[env_idx] = []
                 self._eval_episode_index[env_idx] += 1
         # ======================================================================

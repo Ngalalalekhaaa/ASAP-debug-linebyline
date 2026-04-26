@@ -484,6 +484,7 @@ class LeggedRobotBase(BaseTask):
                 # self.history_handler.add(key, self.hist_obs_dict[key]) # 将当前状态hist_obs_dict(加噪且放缩过的这一期的观测值)推入历史序列，供未来使用
                 # print(key, self.hist_obs_dict[key])
         self.need_to_refresh_envs[refresh_env_ids] = False#这句不能注释掉，否则进入循环中的紧下面几行会将已经经过一步错当作初始状态重新赋值给仿真器。模型第一步会倒就是因为这句错误地注释掉了，实际不能注释
+        self.reset_buf[:]=0#需要。否则打印信息中的奖励会丢失第1帧（0值），且无法save动作数据
 
 
 
