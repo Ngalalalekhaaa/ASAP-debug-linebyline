@@ -91,7 +91,7 @@ class DeltaA_ClosedLoop(LeggedRobotMotionTracking):
         """
 
         # 将策略输出的网络动作乘以动作缩放系数 (Action Scale)，得到真实物理范围的目标值
-        actions_scaled = actions * self.config.robot.control.action_scale
+        actions_scaled = actions * self.config.robot.control.action_scale#0.25
         control_type = self.config.robot.control.control_type # 获取控制类型（通常是 "P" 代表 PD位置控制）
         if self.config['add_extra_action']: # 如果配置中要求附加额外动作（即 Delta-A）
             # 获取当前时间步的名义动作/闭环动作

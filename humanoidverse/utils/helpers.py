@@ -165,8 +165,8 @@ def parse_observation(cls: Any,
         # * 2. - 1. 将其变换为 -1 到 1 之间的均匀分布噪声。
         # 再乘以 obs_noise 得到实际添加的物理噪声量。
         # 公式解释： (原始观测 + 均匀噪声) * 缩放系数。 注意：这里是加了噪声后再乘缩放系数！
-        # buf_dict[obs_key] = (actor_obs + (torch.rand_like(actor_obs)* 2. - 1.) * obs_noise) * obs_scale#先加噪再乘放缩系数
-        buf_dict[obs_key] = (actor_obs ) * obs_scale#先加噪再乘放缩系数
+        buf_dict[obs_key] = (actor_obs + (torch.rand_like(actor_obs)* 2. - 1.) * obs_noise) * obs_scale#先加噪再乘放缩系数
+        # buf_dict[obs_key] = (actor_obs ) * obs_scale#先加噪再乘放缩系数
 
 """
 【函数说明】：parse_observation

@@ -311,6 +311,7 @@ class PPO(BaseAlgo):
         【被谁调用】_rollout_step 内部循环中。
         """
         actions = self._actor_act_step(obs_dict) # Actor 输出具体动作（包含探索噪声）
+        print(f"实际采样动作（actions）张量的统计信息：\n- 形状: {actions.shape}\n- 数值范围: [{actions.min().item()}, {actions.max().item()}]\n- 是否包含 NaN: {torch.isnan(actions).any().item()}\n- 是否包含 Inf: {torch.isinf(actions).any().item()}\n")
         policy_state_dict["actions"] = actions
         
         action_mean = self.actor.action_mean.detach() # Actor 认为最完美的动作均值

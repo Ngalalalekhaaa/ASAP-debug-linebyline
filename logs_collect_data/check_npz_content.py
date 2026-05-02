@@ -83,19 +83,29 @@ nohup python humanoidverse/train_agent.py \
 +rewards=motion_tracking/delta_a/reward_delta_a_openloop \
 +robot=g1/g1_29dof_anneal_23dof \
 +terrain=terrain_locomotion_plane \
-+obs=delta_a/open_loop \
++obs=delta_a/openloop_addobs_all \
 num_envs=8192 \
 project_name=DeltaA_Training \
-robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum128_20260413184401.pkl" \
+robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/mtnum3000_addobsnoise_20260426212346.pkl" \
 env.config.max_episode_length_s=1.0 \
-rewards.reward_scales.penalty_minimal_action_norm=-0.5 \
-+device=cuda:1 \
+rewards.reward_scales.penalty_minimal_action_norm=-0.1 \
++device=cuda:7 \
 env.config.resample_motion_when_training=True \
 env.config.resample_time_interval_s=10000 \
+experiment_name=trybesteffect \
+log_task_name=from_start_obsall_actionclip5 \
++rewards.reward_scales.mpjpe=0 \
+robot.control.action_clip_value=5.0 \
+> openloopDeltaA_0430_trybesteffect_from_start_obsall_actionclip5_cuda7.log 2>&1 &
+
+
+robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/mtnum3000_addobsnoise_20260426212346.pkl" \
+robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum128_20260413184401.pkl" \
 +checkpoint=logs/DeltaA_Training/20260413_204909-openloopDeltaA_training-delta_a-g1_29dof_anneal_23dof/model_17300.pt \
-experiment_name=after_20260413_204909_17300pt_penaltyMinimalAction0p5 \
-log_task_name=check_stop_error_num3 \
-> openloopDeltaA_timeoutonly_mtnum128_20260413184401_cuda1_check_stop_error_num3.log 2>&1 &
++checkpoint="logs/DeltaA_Training/20260427_091950-mtnum3000_addobsnoise_20260426212346-actionorm_m0p1_mpjpe_0-g1_29dof_anneal_23dof/model_12700.pt" \
+log_task_name=after_20260427_091950-mtnum3000_addobsnoise_20260426212346-actionorm_m0p1_12700pt_with_2th_defenses \
+robot.control.action_clip_value=5.0 \
+
 
 
 # HYDRA_FULL_ERROR=1 \
@@ -127,10 +137,12 @@ HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
 +checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt \
 +simulator=genesis \
 +env.config.save_motion=True \
-+env.config.save_note=test5_mtnum4_allsame \
++env.config.save_note=mtnum10000_addobsnoise \
 +env.config.eval_timestamp=$(date +%Y%m%d_%H%M%S) \
-+num_envs=4 \
-+rewards.reward_scales.mpjpe=1
++num_envs=10000 \
++rewards.reward_scales.mpjpe=1 \
++headless=True \
++device=cuda:7
 
 #+opt=eval_analysis_plot_motion_tracking_openloop
 
@@ -145,10 +157,11 @@ python logs_collect_data/replay_motion_in_sim.py \
 +robot=g1/g1_29dof_anneal_23dof \
 +terrain=terrain_locomotion_plane \
 +obs=motion_tracking/deepmimic_a2c_nolinvel_LARGEnoise_history \
-+visualize_motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/timeoutonly_mtnum4_20260413154759.pkl" \
++visualize_motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/test_mtnum1_addobsnoise_20260426210721.pkl" \
 +replay_num_envs=1 \
 +recenter_nonzero_to_origin=True \
-+motion_key=motion0
++motion_key=motion0 \
++rewards.reward_scales.mpjpe=1
 
 
 +experiment_name=
@@ -188,16 +201,16 @@ HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
 python humanoidverse/eval_agent.py \
 +simulator=isaacgym \
 +exp=train_delta_a_closed_loop \
-algo.config.policy_checkpoint="logs/DeltaA_Training/20260416_171312-after_20260413_204909_17300pt_penaltyMinimalAction0p5-check_stop_error_num3-g1_29dof_anneal_23dof/model_82900.pt" \
+algo.config.policy_checkpoint="logs/DeltaA_Training/20260428_122356-test_deltaaTraining-openloop_addobs_all-g1_29dof_anneal_23dof/model_4900.pt" \
 +domain_rand=NO_domain_rand_finetune_with_deltaA \
 +rewards=motion_tracking/reward_motion_tracking_dm_simfinetuning \
 +robot=g1/g1_29dof_anneal_23dof \
 +terrain=terrain_locomotion_plane \
-+obs=delta_a/train_policy_with_delta_a \
-+num_envs=4 \
++obs=delta_a/openloop_addobs_all \
++num_envs=1 \
 +project_name=DeltaA_Finetune \
 experiment_name=finetune_with_deltaA \
-robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/test5_mtnum4_allsame_20260426141944.pkl" \
+robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/test5_mtnum4_allsame_20260426181550.pkl" \
 +checkpoint="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt" \
 domain_rand.push_robots=False \
 env.config.noise_to_initial_level=0 \
@@ -212,3 +225,10 @@ env.config.add_extra_action=True
 algo.config.policy_checkpoint="logs/DeltaA_Training/20260412_102648-openloopDeltaA_training-delta_a-g1_29dof_anneal_23dof/model_10000.pt" \
 algo.config.policy_checkpoint="logs/DeltaA_Training/20260413_204233-openloopDeltaA_training-delta_a-g1_29dof_anneal_23dof/model_50900.pt" \
 algo.config.policy_checkpoint="logs/DeltaA_Training/20260416_171312-after_20260413_204909_17300pt_penaltyMinimalAction0p5-check_stop_error_num3-g1_29dof_anneal_23dof/model_82900.pt" \
+algo.config.policy_checkpoint="logs/DeltaA_Training/20260418_230309-after_20260413_204909_17300pt_penaltyMinimalAction0p5-actionnorm_m0p5-g1_29dof_anneal_23dof/model_10000.pt"
+algo.config.policy_checkpoint="logs/DeltaA_Training/20260418_230419-after_20260413_204909_17300pt_penaltyMinimalAction0p5-actionnorm_m0p5-g1_29dof_anneal_23dof/model_10000.pt" \
+algo.config.policy_checkpoint="logs/DeltaA_Training/20260427_091950-mtnum3000_addobsnoise_20260426212346-actionorm_m0p1_mpjpe_0-g1_29dof_anneal_23dof/model_3300.pt" \
+    
+    
+robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/test5_mtnum4_allsame_20260426141944.pkl" \
+openloop_addobs_all

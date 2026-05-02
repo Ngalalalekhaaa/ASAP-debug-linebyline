@@ -1,5 +1,7 @@
 from __future__ import annotations # 允许在定义类之前在类型提示中使用该类的名字（前向引用）
 from copy import deepcopy # 引入深拷贝，用于在内存中完全复制一个复杂的对象（如神经网络模型）
+from datetime import datetime
+import os
 
 import torch # 导入PyTorch深度学习框架核心库
 import torch.nn as nn # 导入PyTorch的神经网络模块，用于构建网络层（如全连接层）
@@ -87,7 +89,83 @@ class PPOActor(nn.Module):
         # 【函数作用】根据当前状态，执行一次神经网络前向传播，计算并更新动作的高斯分布。
         # 【被谁调用】被自身的 act 方法调用。
         mean = self.actor(actor_obs) # 将观察数据输入神经网络（Actor），网络前向传播输出预测的动作均值（mean）
-        self.distribution = Normal(mean, mean*0. + self.std) # 构造PyTorch的标准正态分布对象。mean*0. 是为了通过广播机制将全局可学习的 self.std 扩展成与 mean 形状一致的张量
+        # self.distribution = Normal(mean, mean*0. + self.std) # 构造PyTorch的标准正态分布对象。mean*0. 是为了通过广播机制将全局可学习的 self.std 扩展成与 mean 形状一致的张量
+        print(f"动作均值（mean）张量的统计信息：\n- 形状: {mean.shape}\n- 数值范围: [{mean.min().item()}, {mean.max().item()}]\n- 是否包含 NaN: {torch.isnan(mean).any().item()}\n- 是否包含 Inf: {torch.isinf(mean).any().item()}\n")
+        print(f"动作标准差（std）张量的统计信息：\n- 形状: {self.std.shape}\n- 数值范围: [{self.std.min().item()}, {self.std.max().item()}]\n- 是否包含 NaN: {torch.isnan(self.std).any().item()}\n- 是否包含 Inf: {torch.isinf(self.std).any().item()}\n")
+        try:
+            # 你的原始代码：尝试构建正态分布
+            self.distribution = Normal(mean, mean*0. + self.std)
+        except ValueError as e:
+            # 1. 生成时间戳，作为两个文件的统一后缀，方便对应
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            txt_filename = f"crash_locals_{timestamp}.txt"  # 文件1：文本日志
+            pt_filename = f"crash_tensors_{timestamp}.pt"   # 文件2：张量数据
+            
+            # ========== 生成文件 1：所有的 locals() 文本摘要 ==========
+            with open(txt_filename, "w", encoding="utf-8") as f:
+                f.write("🚨 致命报错拦截：试图用 NaN 构建正态分布！\n")
+                f.write(f"报错信息: {e}\n\n")
+                f.write("🔍 当前函数内的所有局部变量 (locals) 状态:\n")
+                
+                for var_name, var_value in locals().items():
+                    if isinstance(var_value, torch.Tensor):
+                        has_nan = torch.isnan(var_value).any().item()
+                        has_inf = torch.isinf(var_value).any().item()
+                        f.write(f"👉 {var_name}: [Tensor] 形状 {var_value.shape} | 包含 NaN: {has_nan} | 包含 Inf: {has_inf}\n")
+                    else:
+                        # 强转字符串并截断前200个字符，防止文本过长
+                        f.write(f"👉 {var_name}: {str(var_value)[:200]}\n") 
+
+            # ========== 检查 self.env.rew_buf 是否包含 NaN，并记录对应奖励分量 ==========
+            if hasattr(self, "env") and hasattr(self.env, "rew_buf"):
+                rew_buf = self.env.rew_buf
+                if isinstance(rew_buf, torch.Tensor):
+                    nan_mask = torch.isnan(rew_buf)
+                    if nan_mask.any().item():
+                        nan_ids = torch.nonzero(nan_mask, as_tuple=False).flatten().tolist()
+                        print(f"🚨 检测到 self.env.rew_buf 含 NaN，env_ids={nan_ids}")
+
+                        reward_components = {}
+                        if hasattr(self.env, "episode_sums") and isinstance(self.env.episode_sums, dict):
+                            reward_components.update(self.env.episode_sums)
+                        if hasattr(self.env, "extras") and isinstance(self.env.extras, dict):
+                            for k, v in self.env.extras.items():
+                                if isinstance(v, torch.Tensor) and v.shape[:1] == rew_buf.shape[:1]:
+                                    reward_components[f"extras.{k}"] = v
+
+                        with open(txt_filename, "a", encoding="utf-8") as f:
+                            f.write("\n\n🧪 self.env.rew_buf NaN 详细排查:\n")
+                            f.write(f"nan env ids: {nan_ids}\n")
+                            for env_id in nan_ids:
+                                f.write(f"\n[env_id={env_id}] rew_buf={rew_buf[env_id].item()}\n")
+                                print(f"[env_id={env_id}] rew_buf={rew_buf[env_id].item()}")
+                                for name, tensor_val in reward_components.items():
+                                    if isinstance(tensor_val, torch.Tensor) and tensor_val.shape[:1] == rew_buf.shape[:1]:
+                                        val = tensor_val[env_id].item()
+                                        has_nan = torch.isnan(tensor_val[env_id]).item()
+                                        has_inf = torch.isinf(tensor_val[env_id]).item()
+                                        f.write(f"  - {name}: {val} (NaN={has_nan}, Inf={has_inf})\n")
+                                        print(f"  - {name}: {val} (NaN={has_nan}, Inf={has_inf})")
+            
+            
+            # ========== 生成文件 2：所有的张量真实数据 ==========
+            tensor_dict = {}
+            for var_name, var_value in locals().items():
+                if isinstance(var_value, torch.Tensor):
+                    # .detach().cpu() 是极其关键的一步，它把张量从 GPU 显存上安全地拷贝到系统内存中
+                    tensor_dict[var_name] = var_value.detach().cpu()
+            
+            torch.save(tensor_dict, pt_filename)
+            
+            # ========== 终端通知与终止 ==========
+            print("\n" + "="*60)
+            print("🚨 发生数值崩溃！现场数据已封存：")
+            print(f"📄 Locals 文本日志: {os.path.abspath(txt_filename)}")
+            print(f"📦 Tensors 真实数据: {os.path.abspath(pt_filename)}")
+            print("="*60 + "\n")
+            
+            raise e # 再次抛出错误，彻底停止程序的错误运行
+        
 
     def act(self, actor_obs, **kwargs):
         # 【函数作用】在训练阶段与环境交互时获取动作。它会根据当前策略分布“采样”出一个带噪声的动作。

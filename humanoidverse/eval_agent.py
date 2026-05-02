@@ -229,7 +229,7 @@ def main(override_config: OmegaConf):
     if config.get("device", None):
         device = config.device
     else:
-        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        device = "cuda:7" if torch.cuda.is_available() else "cpu"
 
     # 创建并保存本次评估的配置备份日志，方便后续查阅
     eval_log_dir = Path(config.eval_log_dir)

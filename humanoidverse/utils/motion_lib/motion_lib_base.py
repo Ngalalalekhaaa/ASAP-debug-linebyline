@@ -339,14 +339,14 @@ class MotionLibBase():
             sample_idxes = torch.remainder(torch.arange(num_motion_to_load) + start_idx, self._num_unique_motions ).to(self._device)
 
         self._curr_motion_ids = sample_idxes
-        self.curr_motion_keys = self._motion_data_keys[sample_idxes.cpu()]
+        self.curr_motion_keys = self._motion_data_keys[sample_idxes.cpu()]#motion0,motion1,...等等
         # self._sampling_batch_prob = self._sampling_prob[self._curr_motion_ids] / self._sampling_prob[self._curr_motion_ids].sum()
 
         logger.info(f"Loading {num_motion_to_load} motions...")
         logger.info(f"Sampling motion: {sample_idxes[:5]}, ....")
         logger.info(f"Current motion keys: {self.curr_motion_keys[:5]}, ....")
 
-        motion_data_list = self._motion_data_list[sample_idxes.cpu().numpy()]
+        motion_data_list = self._motion_data_list[sample_idxes.cpu().numpy()]#每个环境分配的动作字典
         
         # 调用核心骨骼绑定解析器，解算出具体每个帧下各刚体的坐标
         res_acc = self.load_motion_with_skeleton(motion_data_list, self.fix_height, target_heading, max_len)
@@ -357,7 +357,7 @@ class MotionLibBase():
             motion_fps = curr_motion.fps
             curr_dt = 1.0 / motion_fps
             num_frames = curr_motion.global_rotation.shape[0]
-            curr_len = 1.0 / motion_fps * (num_frames - 1)
+            curr_len = 1.0 / motion_fps * (num_frames - 1)# 计算这个动作的实际时长（秒），因为有些动作片段可能被 max_len 截断了
 
             # 存取体型参数和轴角参数（主要用于人体 SMPL 模型）
             if "beta" in motion_file_data:
@@ -365,7 +365,7 @@ class MotionLibBase():
                 _motion_bodies.append(curr_motion.gender_beta)
             else:
                 _motion_aa.append(np.zeros((num_frames, self.num_joints * 3)))
-                _motion_bodies.append(torch.zeros(17))
+                _motion_bodies.append(torch.zeros(17))#？？17 是 SMPL 模型里用来控制体型的 beta 参数的数量，如果不是人体模型就直接塞零占位
 
             _motion_fps.append(motion_fps)
             _motion_dt.append(curr_dt)
