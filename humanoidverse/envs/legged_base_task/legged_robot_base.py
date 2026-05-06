@@ -700,8 +700,8 @@ class LeggedRobotBase(BaseTask):
             return
         
         
-        print("全部self.episode_sums['mpjpe']取值:", self.episode_sums["mpjpe"])
-        print("self.episode_sums['mpjpe']的平均值:", self.episode_sums["mpjpe"].mean())
+        # print("全部self.episode_sums['mpjpe']取值:", self.episode_sums["mpjpe"])
+        # print("self.episode_sums['mpjpe']的平均值:", self.episode_sums["mpjpe"].mean())
 
         # for i in range(len(self.reward_functions)):
         #             name = self.reward_names[i]#reward_names[i]和reward_functions[i]是一一对应的，都是按照配置中reward_scales里非零的奖励项顺序排列的。reward_names[i]是字符串名字，reward_functions[i]是函数指针。
@@ -1164,7 +1164,7 @@ class LeggedRobotBase(BaseTask):
     def _reward_penalty_torques(self):
         # Penalize torques
         # 能量效率惩罚：力矩平方的累加和。力出的越大扣分越多，鼓励省电和利用自身重力。
-        return torch.sum(torch.square(self.torques), dim=1)
+        return torch.sum(torch.square(self.torques), dim=1)#torch.square:对所有数平方，张量维度不变
     
     def _reward_penalty_dof_vel(self):
         # Penalize dof velocities
@@ -1194,10 +1194,10 @@ class LeggedRobotBase(BaseTask):
         if self.use_reward_limits_dof_pos_curriculum:
             m = (self.simulator.hard_dof_pos_limits[:, 0] + self.simulator.hard_dof_pos_limits[:, 1]) / 2
             r = self.simulator.hard_dof_pos_limits[:, 1] - self.simulator.hard_dof_pos_limits[:, 0]
-            lower_soft_limit = m - 0.5 * r * self.soft_dof_pos_curriculum_value
+            lower_soft_limit = m - 0.5 * r * self.soft_dof_pos_curriculum_value#课程软限制
             upper_soft_limit = m + 0.5 * r * self.soft_dof_pos_curriculum_value
         else:
-            lower_soft_limit = self.simulator.dof_pos_limits[:, 0]
+            lower_soft_limit = self.simulator.dof_pos_limits[:, 0]#self.simulator.dof_pos_limits是软限制（硬限制要求再高一点），实际上就是限制范围
             upper_soft_limit = self.simulator.dof_pos_limits[:, 1]
         out_of_limits = -(self.simulator.dof_pos - lower_soft_limit).clip(max=0.) # lower limit
         out_of_limits += (self.simulator.dof_pos - upper_soft_limit).clip(min=0.)

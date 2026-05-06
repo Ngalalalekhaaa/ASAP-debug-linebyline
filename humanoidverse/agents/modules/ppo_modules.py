@@ -90,8 +90,8 @@ class PPOActor(nn.Module):
         # 【被谁调用】被自身的 act 方法调用。
         mean = self.actor(actor_obs) # 将观察数据输入神经网络（Actor），网络前向传播输出预测的动作均值（mean）
         # self.distribution = Normal(mean, mean*0. + self.std) # 构造PyTorch的标准正态分布对象。mean*0. 是为了通过广播机制将全局可学习的 self.std 扩展成与 mean 形状一致的张量
-        print(f"动作均值（mean）张量的统计信息：\n- 形状: {mean.shape}\n- 数值范围: [{mean.min().item()}, {mean.max().item()}]\n- 是否包含 NaN: {torch.isnan(mean).any().item()}\n- 是否包含 Inf: {torch.isinf(mean).any().item()}\n")
-        print(f"动作标准差（std）张量的统计信息：\n- 形状: {self.std.shape}\n- 数值范围: [{self.std.min().item()}, {self.std.max().item()}]\n- 是否包含 NaN: {torch.isnan(self.std).any().item()}\n- 是否包含 Inf: {torch.isinf(self.std).any().item()}\n")
+        # print(f"动作均值（mean）张量的统计信息：\n- 形状: {mean.shape}\n- 数值范围: [{mean.min().item()}, {mean.max().item()}]\n- 是否包含 NaN: {torch.isnan(mean).any().item()}\n- 是否包含 Inf: {torch.isinf(mean).any().item()}\n")
+        # print(f"动作标准差（std）张量的统计信息：\n- 形状: {self.std.shape}\n- 数值范围: [{self.std.min().item()}, {self.std.max().item()}]\n- 是否包含 NaN: {torch.isnan(self.std).any().item()}\n- 是否包含 Inf: {torch.isinf(self.std).any().item()}\n")
         try:
             # 你的原始代码：尝试构建正态分布
             self.distribution = Normal(mean, mean*0. + self.std)
