@@ -927,14 +927,14 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
     #      [-1.7129e-02, -1.0014e-04, -1.2165e-01]]], device='cuda:0')}
             
             # 获取噪声比例
-            # root_pos_noise = self.config.init_noise_scale.root_pos * self.config.noise_to_initial_level
-            # root_rot_noise = self.config.init_noise_scale.root_rot * 3.14 / 180 * self.config.noise_to_initial_level
-            # root_vel_noise = self.config.init_noise_scale.root_vel * self.config.noise_to_initial_level
-            # root_ang_vel_noise = self.config.init_noise_scale.root_ang_vel * self.config.noise_to_initial_level
-            root_pos_noise = 0
-            root_rot_noise = 0            
-            root_vel_noise = 0
-            root_ang_vel_noise = 0
+            root_pos_noise = self.config.init_noise_scale.root_pos * self.config.noise_to_initial_level
+            root_rot_noise = self.config.init_noise_scale.root_rot * 3.14 / 180 * self.config.noise_to_initial_level
+            root_vel_noise = self.config.init_noise_scale.root_vel * self.config.noise_to_initial_level
+            root_ang_vel_noise = self.config.init_noise_scale.root_ang_vel * self.config.noise_to_initial_level
+            # root_pos_noise = 0
+            # root_rot_noise = 0            
+            # root_vel_noise = 0
+            # root_ang_vel_noise = 0
 
             
             
@@ -1203,10 +1203,10 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         # print(f"动作库中读取的该动作当前时刻的关节速度: motion_res['dof_vel'][env_ids]={dof_vel}")
         
         # 强制复写电机角度和速度，完成重生
-        # self.simulator.dof_pos[env_ids] = dof_pos + torch.randn_like(dof_pos) * dof_pos_noise
-        # self.simulator.dof_vel[env_ids] = dof_vel + torch.randn_like(dof_vel) * dof_vel_noise
-        self.simulator.dof_pos[env_ids] = dof_pos 
-        self.simulator.dof_vel[env_ids] = dof_vel 
+        self.simulator.dof_pos[env_ids] = dof_pos + torch.randn_like(dof_pos) * dof_pos_noise
+        self.simulator.dof_vel[env_ids] = dof_vel + torch.randn_like(dof_vel) * dof_vel_noise
+        # self.simulator.dof_pos[env_ids] = dof_pos 
+        # self.simulator.dof_vel[env_ids] = dof_vel 
         # print(f"reset_dof中读取仿真器中self.simulator.dof_pos[env_ids]: {self.simulator.dof_pos[env_ids]}")
         # print(f"reset_dof中读取仿真器中self.simulator.dof_vel[env_ids]: {self.simulator.dof_vel[env_ids]}")
 
@@ -1687,18 +1687,6 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                     f"recent{min(recent_n, total_finished)}_mean_len={recent_length_mean:.2f} total_finished={total_finished}",
                     "cyan"
                 ))
-
-                # 每累积500个回合，打印该批次的平均指标
-                batch_n = 500
-                if total_finished % batch_n == 0 and total_finished > 0:
-                    batch_returns = self._eval_completed_returns[-batch_n:]
-                    batch_lengths = self._eval_completed_lengths[-batch_n:]
-                    batch_return_mean = float(np.mean(batch_returns))
-                    batch_length_mean = float(np.mean(batch_lengths))
-                    print(colored(
-                        f"[eval-batch] batch_episodes={batch_n} mean_return={batch_return_mean:.6f} mean_len={batch_length_mean:.2f} total_finished={total_finished}",
-                        "green"
-                    ))
 
                 # 清空该 env 当前 episode 缓存，开始下一回合统计。
                 self._eval_episode_returns[env_idx] = 0.0#reset_all中self.reset_buf是否置0只会，在这个判断条件只会影响打印，以及下一行self._eval_episode_step_rewards[env_idx]记录的每帧奖励，是否包含第一帧为0的这个值（第一帧为0,或从实际第2帧开始）
