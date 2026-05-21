@@ -1,0 +1,14 @@
+--- humanoidverse/agents/ppo/ppo.py 
++++ humanoidverse/agents/ppo/ppo.py 
+@@ -816,8 +816,11 @@
+             actor_state["step"] = step
+             
+             actor_state = self._pre_eval_env_step(actor_state) # 脑力运算：看传感器出关节扭矩
++            print("AFTER PRE")
+             actor_state = self.env_step(actor_state) # 物理运算：物理引擎演进
++            print("AFTER ENV STEP")
+             actor_state = self._post_eval_env_step(actor_state) # 善后处理：如果插件要截图，就在这截图
++            print("AFTER POST")
+             
+             # # ================= 全量打印模块 开始 =================
+             # print(f"\n========== Step {step} ==========")

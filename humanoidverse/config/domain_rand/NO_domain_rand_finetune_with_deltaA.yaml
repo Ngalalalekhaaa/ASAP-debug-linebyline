@@ -72,5 +72,9 @@ domain_rand:
   cotrain_with_without_delta_a: False
   without_delta_a_ratio: 0.5
 
-  rescale_delta_a: False
-  delta_a_scale_range: [0.5, 1.5]
+  # rescale_delta_a: False
+  # delta_a_scale_range: [0.5, 1.5]
+
+
+  rescale_delta_a: True
+  delta_a_scale_range: [0.5, 0.5]

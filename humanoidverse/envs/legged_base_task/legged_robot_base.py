@@ -377,7 +377,16 @@ class LeggedRobotBase(BaseTask):
         # check terminations
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten() # 捞出所有被判死刑的环境 ID
         self.reset_envs_idx(env_ids) # 真正去重置它们的参数位置
-
+        # if len(env_ids) > 0:
+        #     mpjpe_mean_val = self.episode_sums["mpjpe"].mean().item()
+            
+        #     # 【核心修改】过滤掉 step 为 0 时的初始化重置
+        #     # 正常跑完一轮，MPJPE 绝对不可能恰好等于 0
+        #     if mpjpe_mean_val > 1e-6: 
+        #         print(f"==== EVAL_RESULT_MPJPE: {mpjpe_mean_val} ====")
+        #         exit(0)
+        
+        
         # set envs
         refresh_env_ids = self.need_to_refresh_envs.nonzero(as_tuple=False).flatten()
         if len(refresh_env_ids) > 0:
@@ -699,10 +708,18 @@ class LeggedRobotBase(BaseTask):
         if len(env_ids) == 0:
             return
         
-        
+        # try:
         # print("全部self.episode_sums['mpjpe']取值:", self.episode_sums["mpjpe"])
         # print("self.episode_sums['mpjpe']的平均值:", self.episode_sums["mpjpe"].mean())
-
+        # mpjpe_mean_val = self.episode_sums["mpjpe"].mean().item()
+        
+        # # 【核心修改】过滤掉 step 为 0 时的初始化重置
+        # # 正常跑完一轮，MPJPE 绝对不可能恰好等于 0
+        # if mpjpe_mean_val > 1e-6: 
+        #     print(f"==== EVAL_RESULT_MPJPE: {mpjpe_mean_val} ====")
+        #     exit(0)
+        # except:
+        #     i=0
         # for i in range(len(self.reward_functions)):
         #             name = self.reward_names[i]#reward_names[i]和reward_functions[i]是一一对应的，都是按照配置中reward_scales里非零的奖励项顺序排列的。reward_names[i]是字符串名字，reward_functions[i]是函数指针。
         #             print(f"各项累计奖励：{name}:{self.episode_sums[name]}")
@@ -1029,6 +1046,10 @@ class LeggedRobotBase(BaseTask):
         # 将归一化的 action 乘以我们定义的一个动作放大系数（Action Scale）
         actions_scaled = actions * self.config.robot.control.action_scale
         control_type = self.config.robot.control.control_type
+        
+        if self.config.domain_rand.randomize_action_add:
+            actions_scaled += (torch.rand_like(actions_scaled)*2.-1.) * self.config.domain_rand.max_action_add
+
         if control_type=="P":
             # 位置控制模式（最常用）：扭矩 = KP * (目标角度 - 真实角度) - KD * 真实角速度
             torques = self._kp_scale * self.p_gains*(actions_scaled + self.default_dof_pos - self.simulator.dof_pos) - self._kd_scale * self.d_gains*self.simulator.dof_vel

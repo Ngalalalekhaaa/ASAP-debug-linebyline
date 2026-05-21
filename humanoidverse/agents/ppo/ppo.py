@@ -254,7 +254,7 @@ class PPO(BaseAlgo):
             self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
         
         # 集训开始前，先拿取所有机器人的第一眼传感器画面
-        obs_dict = self.env.reset_all()
+        print("BEFORE RESET ALL"); obs_dict = self.env.reset_all(); print("AFTER RESET ALL")
         for obs_key in obs_dict.keys():
             obs_dict[obs_key] = obs_dict[obs_key].to(self.device) # 数据推送到 GPU
             
@@ -771,8 +771,8 @@ class PPO(BaseAlgo):
         【被谁调用】通常被调试脚本或查看输入维度的测试代码调用。
         """
         # while True:
-        #     obs_dict = self.env.reset_all()
-        obs_dict = self.env.reset_all()
+        #     print("BEFORE RESET ALL"); obs_dict = self.env.reset_all(); print("AFTER RESET ALL")
+        print("BEFORE RESET ALL"); obs_dict = self.env.reset_all(); print("AFTER RESET ALL")
         for obs_key in obs_dict.keys():
             print(obs_key, sorted(self.env.config.obs.obs_dict[obs_key]))
         # move to cpu
@@ -805,11 +805,11 @@ class PPO(BaseAlgo):
             #     #actor_state = self._create_actor_state() # 拿个小本本记录测试时的短期状态
             #     step = 0
             #     #self.eval_policy = self._get_inference_policy() # 提取纯净大脑模型（这个函数输入action_obs,输出动作均值）
-            #     #obs_dict = self.env.reset_all() # 机器人归零发车
-            #     init_actions = torch.zeros(self.env.num_envs, self.num_act, device=self.device) # 第一步不发力
+            #     #print("BEFORE RESET ALL"); obs_dict = self.env.reset_all(); print("AFTER RESET ALL") # 机器人归零发车
+            #     print("BEFORE INIT ACTIONS"); init_actions = torch.zeros(self.env.num_envs, self.num_act, device=self.device); print("AFTER INIT ACTIONS") # 第一步不发力
             #     actor_state.update({"obs": obs_dict})#这里的obs_dict是循环外置为0的obs_dict,下面循环中的self.env_step()中的obs_dict是局部变量，在这里访问不到
             #     actor_state.update({"actions": init_actions})
-            #     #actor_state = self._pre_eval_env_step(actor_state) # 预热算第一步动作
+            #     #print("BEFORE PRE EVAL ENV STEP"); actor_state = self._pre_eval_env_step(actor_state); print("AFTER PRE EVAL ENV STEP") # 预热算第一步动作
 
             
             
@@ -1493,10 +1493,10 @@ class PPO(BaseAlgo):
     #         self._pre_evaluate_policy()
     #         actor_state = self._create_actor_state()
     #         self.eval_policy = self._get_inference_policy()
-    #         obs_dict = self.env.reset_all()
-    #         init_actions = torch.zeros(self.env.num_envs, self.num_act, device=self.device)
-    #         actor_state.update({"obs": obs_dict, "actions": init_actions})
-    #         actor_state = self._pre_eval_env_step(actor_state)
+    #         print("BEFORE RESET ALL"); obs_dict = self.env.reset_all(); print("AFTER RESET ALL")
+    #         print("BEFORE INIT ACTIONS"); init_actions = torch.zeros(self.env.num_envs, self.num_act, device=self.device); print("AFTER INIT ACTIONS")
+    #         print("BEFORE UPDATE ACTOR STATE"); actor_state.update({"obs": obs_dict, "actions": init_actions}); print("AFTER UPDATE ACTOR STATE")
+    #         print("BEFORE PRE EVAL ENV STEP"); actor_state = self._pre_eval_env_step(actor_state); print("AFTER PRE EVAL ENV STEP")
             
     #         T = num_collect_steps
     #         N = self.env.num_envs
@@ -1520,7 +1520,7 @@ class PPO(BaseAlgo):
 
     #         for step in range(T):
     #             actor_state["step"] = step
-    #             actor_state = self._pre_eval_env_step(actor_state) 
+    #             print("BEFORE PRE EVAL ENV STEP"); actor_state = self._pre_eval_env_step(actor_state); print("AFTER PRE EVAL ENV STEP") 
     #             actions = actor_state["actions"]
                 
     #             # 记录数据 (全量记录，后续靠 valid_lengths 截断)
@@ -1640,10 +1640,10 @@ class PPO(BaseAlgo):
         self._pre_evaluate_policy()
         actor_state = self._create_actor_state()
         self.eval_policy = self._get_inference_policy()
-        obs_dict = self.env.reset_all()
-        init_actions = torch.zeros(self.env.num_envs, self.num_act, device=self.device)
-        actor_state.update({"obs": obs_dict, "actions": init_actions})
-        actor_state = self._pre_eval_env_step(actor_state)
+        print("BEFORE RESET ALL"); obs_dict = self.env.reset_all(); print("AFTER RESET ALL")
+        print("BEFORE INIT ACTIONS"); init_actions = torch.zeros(self.env.num_envs, self.num_act, device=self.device); print("AFTER INIT ACTIONS")
+        print("BEFORE UPDATE ACTOR STATE"); actor_state.update({"obs": obs_dict, "actions": init_actions}); print("AFTER UPDATE ACTOR STATE")
+        print("BEFORE PRE EVAL ENV STEP"); actor_state = self._pre_eval_env_step(actor_state); print("AFTER PRE EVAL ENV STEP")
         
         T = num_collect_steps
         N = self.env.num_envs
@@ -1659,7 +1659,7 @@ class PPO(BaseAlgo):
 
         for step in range(T):
             actor_state["step"] = step
-            actor_state = self._pre_eval_env_step(actor_state) 
+            print("BEFORE PRE EVAL ENV STEP"); actor_state = self._pre_eval_env_step(actor_state); print("AFTER PRE EVAL ENV STEP") 
             actions = actor_state["actions"]
             
             # 抓取状态 (IsaacGym 的四元数默认是 xyzw，完美兼容 sRot)

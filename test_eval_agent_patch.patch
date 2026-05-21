@@ -1,0 +1,8 @@
+--- humanoidverse/eval_agent.py
++++ humanoidverse/eval_agent.py
+@@ -311,6 +311,7 @@
+     
+     algo.evaluate_policy()
++    print("FINISHED EVALUATE POLICY")
+ 
+     # algo.evaluate_policy_for_mpjpe(

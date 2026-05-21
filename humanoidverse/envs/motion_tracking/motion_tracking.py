@@ -1347,6 +1347,18 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                     "cyan"
                 ))
 
+                # 每累积500个回合，打印该批次的平均指标
+                batch_n = 500
+                if total_finished % batch_n == 0 and total_finished > 0:
+                    batch_returns = self._eval_completed_returns[-batch_n:]
+                    batch_lengths = self._eval_completed_lengths[-batch_n:]
+                    batch_return_mean = float(np.mean(batch_returns))
+                    batch_length_mean = float(np.mean(batch_lengths))
+                    print(colored(
+                        f"[eval-batch] batch_episodes={batch_n} mean_return={batch_return_mean:.6f} mean_len={batch_length_mean:.2f} total_finished={total_finished}",
+                        "green"
+                    ))
+
                 # 清空该 env 当前 episode 缓存，开始下一回合统计。
                 self._eval_episode_returns[env_idx] = 0.0
                 self._eval_episode_step_rewards[env_idx] = []
@@ -1675,6 +1687,18 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
                     f"recent{min(recent_n, total_finished)}_mean_len={recent_length_mean:.2f} total_finished={total_finished}",
                     "cyan"
                 ))
+
+                # 每累积500个回合，打印该批次的平均指标
+                batch_n = 500
+                if total_finished % batch_n == 0 and total_finished > 0:
+                    batch_returns = self._eval_completed_returns[-batch_n:]
+                    batch_lengths = self._eval_completed_lengths[-batch_n:]
+                    batch_return_mean = float(np.mean(batch_returns))
+                    batch_length_mean = float(np.mean(batch_lengths))
+                    print(colored(
+                        f"[eval-batch] batch_episodes={batch_n} mean_return={batch_return_mean:.6f} mean_len={batch_length_mean:.2f} total_finished={total_finished}",
+                        "green"
+                    ))
 
                 # 清空该 env 当前 episode 缓存，开始下一回合统计。
                 self._eval_episode_returns[env_idx] = 0.0#reset_all中self.reset_buf是否置0只会，在这个判断条件只会影响打印，以及下一行self._eval_episode_step_rewards[env_idx]记录的每帧奖励，是否包含第一帧为0的这个值（第一帧为0,或从实际第2帧开始）

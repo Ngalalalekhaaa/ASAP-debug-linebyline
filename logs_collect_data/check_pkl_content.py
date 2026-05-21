@@ -101,7 +101,8 @@ def view_pkl_contents(file_path, num_rows=5):
 if __name__ == "__main__":
     # 1. 指定你的 .pkl 文件路径
     # pkl_file_path = "logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/test_mtnum1_addobsnoise_20260426210721.pkl"
-    pkl_file_path = "humanoidverse/data/motions/g1_29dof_anneal_23dof/TairanTestbed/singles/0-TairanTestbed_TairanTestbed_CR7_video_CR7_level1_filter_amass.pkl"
+    # pkl_file_path = "humanoidverse/data/motions/g1_29dof_anneal_23dof/TairanTestbed/singles/0-TairanTestbed_TairanTestbed_CR7_video_CR7_level1_filter_amass.pkl"
+    pkl_file_path = "logs/TestIsaacGymInstallation/20260510_151035-G123dof_loco-locomotion-g1_29dof_anneal_23dof/motions/test_locomotion_mtnum4_2th_20260511190848.pkl"
     # 2. 调整你想查看的行数 (时间步数)
     # 把这里的 5 改成你想看的数字，比如 20, 50, 100
     display_rows = 5

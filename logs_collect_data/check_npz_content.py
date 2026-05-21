@@ -85,19 +85,55 @@ rewards.reward_scales.penalty_minimal_action_norm=-0.1 \
 +robot=g1/g1_29dof_anneal_23dof \
 +terrain=terrain_locomotion_plane \
 +obs=delta_a/open_loop \
-num_envs=8192 \
+num_envs=4096 \
 project_name=DeltaA_Training \
-robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/mtnum3001_addmotorandobsnoise_20260506174210.pkl" \
+robot.motion.motion_file="logs/DeltaA_Finetune/20260511_082757-right_deltaa_rescale-deltaa_train_with_nodr3002action_m0p1_2th_openloop0510_2111_3800pt-g1_29dof_anneal_23dof/motions/mtnum3002_CR7_3th_nodmwhencollect_use_05110827_9600pt_20260513220119.pkl" \
 env.config.max_episode_length_s=1 \
-+device=cuda:2 \
++device=cuda:5 \
 env.config.resample_motion_when_training=True \
 env.config.resample_time_interval_s=10000 \
-experiment_name=obsopenloop_mtfile_mtnum3001_addmotorandobsnoise \
-log_task_name=maxepisodelengths1 \
+experiment_name=mtnum3002_CR7_3th_nodmwhencollect_use_05110827_9600pt_20260513220119 \
+log_task_name=from_05110827_3002_mtfile \
 +rewards.reward_scales.mpjpe=0 \
 robot.control.action_clip_value=20.0 \
 algo.config.clip_param=0.2 \
-> 0506/obsopenloop_mtfile_mtnum3001_addmotorandobsnoise_maxepisodelengths1.log 2>&1 &
+> 0513/DeltaA_Training_mtnum3002_CR7_3th_nodmwhencollect_use_05110827_9600pt_20260513220119_from_05110827_3002_mtfile.log 2>&1 &
+
+
+HYDRA_FULL_ERROR=1 \
+nohup python humanoidverse/train_agent.py \
++simulator=isaacgym \
++exp=train_deltaa_openloop_terbygrav \
++domain_rand=NO_domain_rand \
++rewards=motion_tracking/delta_a/rw_deltaa_openloop_terbygrav \
+rewards.reward_scales.penalty_minimal_action_norm=-0.1 \
++robot=g1/g1_29dof_anneal_23dof \
++terrain=terrain_locomotion_plane \
++obs=delta_a/open_loop \
+num_envs=4096 \
+project_name=DeltaA_Training \
+robot.motion.motion_file="logs/DeltaA_Finetune/20260511_082757-right_deltaa_rescale-deltaa_train_with_nodr3002action_m0p1_2th_openloop0510_2111_3800pt-g1_29dof_anneal_23dof/motions/mtnum3002_CR7_3th_nodmwhencollect_use_05110827_9600pt_20260513220119.pkl" \
+env.config.max_episode_length_s=1 \
++device=cuda:6 \
+env.config.resample_motion_when_training=True \
+env.config.resample_time_interval_s=10000 \
+experiment_name=mtnum3002_CR7_3th_add_terbygrav \
+log_task_name=use_05110827_3002_mtfile \
++rewards.reward_scales.mpjpe=0 \
+robot.control.action_clip_value=20.0 \
+algo.config.clip_param=0.2 \
+> 0514/DeltaA_Training_mtnum3002_CR7_3th_mtnum3002_CR7_3th_add_terbygrav_use_05110827_3002_mtfile.log 2>&1 &
+
+
+
+
+nohup python auto_eval_openloop_mpjpe.py \
+> 0513/auto_eval_openloop_mpjpe.log 2>&1 &
+
+robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/mtnum3001_addmotorandobsnoise_20260506174210.pkl" \
+
+
+
 
 
 +checkpoint=logs/0505/20260505_022853-obsopenloop_mtfile_mtnum1_no_addobsnoise-train_without_obsnoise_and_actionclip20-g1_29dof_anneal_23dof/model_4600.pt
@@ -112,18 +148,72 @@ rewards.reward_scales.normalized_penalty_minimal_action_norm=0.1 \
 +obs=delta_a/open_loop \
 num_envs=1 \
 project_name=DeltaA_Training \
-robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/mtnum1_no_addobsnoise_20260505015851.pkl" \
-env.config.max_episode_length_s=1 \
+robot.motion.motion_file="logs/DeltaA_Finetune/20260511_082757-right_deltaa_rescale-deltaa_train_with_nodr3002action_m0p1_2th_openloop0510_2111_3800pt-g1_29dof_anneal_23dof/motions/test_mtnum4_CR7_3th_nodmwhencollect_use_05110827_9600pt_20260514130648.pkl" \
+env.config.max_episode_length_s=8 \
 +device=cuda:0 \
 env.config.resample_motion_when_training=True \
 env.config.resample_time_interval_s=10000 \
 experiment_name=test \
 log_task_name=test \
-+rewards.reward_scales.mpjpe=0 \
++rewards.reward_scales.mpjpe=1 \
 robot.control.action_clip_value=20.0 \
 algo.config.clip_param=0.2 \
-+checkpoint=logs/DeltaA_Training/20260505_204236-obsopenloop_mtfile_mtnum3000_addobsnoise-maxepisodelengths0p25-g1_29dof_anneal_23dof/model_1800.pt \
++checkpoint=logs/DeltaA_Training/20260513_223338-mtnum3002_CR7_3th_nodmwhencollect_use_05110827_9600pt_20260513220119-from_05110827_3002_mtfile-g1_29dof_anneal_23dof/model_2400.pt \
 headless=False
+
+
+python humanoidverse/eval_agent.py \
++simulator=isaacgym \
++exp=train_delta_a_open_loop \
++domain_rand=NO_domain_rand \
++rewards=motion_tracking/delta_a/reward_delta_a_openloop \
+rewards.reward_scales.normalized_penalty_minimal_action_norm=0.1 \
++robot=g1/g1_29dof_anneal_23dof \
++terrain=terrain_locomotion_plane \
++obs=delta_a/open_loop \
++num_envs=5 \
++project_name=DeltaA_Training \
+robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/tt_mtnum5_CR7_1th_use_02080215_12300pt_20260515133341.pkl" \
+env.config.max_episode_length_s=8 \
++device=cuda:0 \
+env.config.resample_motion_when_training=True \
+env.config.resample_time_interval_s=10000 \
+experiment_name=test \
+log_task_name=test \
++rewards.reward_scales.mpjpe=1 \
+robot.control.action_clip_value=20.0 \
+algo.config.clip_param=0.2 \
++checkpoint=logs/DeltaA_Training/20260507_164917-obsopenloop_mtfile_mtnum3000_addobsnoise_20260426212346-penalty_minimal_action_norm_m0p125-g1_29dof_anneal_23dof/model_5300.pt \
++headless=False
+
+
+python humanoidverse/train_agent.py \
++simulator=isaacgym \
++exp=train_delta_a_open_loop \
++domain_rand=NO_domain_rand \
++rewards=motion_tracking/delta_a/reward_delta_a_openloop \
+rewards.reward_scales.normalized_penalty_minimal_action_norm=0.1 \
++robot=g1/g1_29dof_anneal_23dof \
++terrain=terrain_locomotion_plane \
++obs=delta_a/open_loop \
+num_envs=1 \
+project_name=DeltaA_Training \
+robot.motion.motion_file="logs/MotionTracking/20260507_161819-CR7amass_pretraindomainrandinpaper-motion_tracking-g1_29dof_anneal_23dof/motions/mtnum3002_05071618domainrandinpaper9900pt_nodmwhencollect_20260509004754.pkl" \
+env.config.max_episode_length_s=8 \
++device=cuda:0 \
+env.config.resample_motion_when_training=True \
+env.config.resample_time_interval_s=10000 \
+experiment_name=test \
+log_task_name=test \
++rewards.reward_scales.mpjpe=1 \
+robot.control.action_clip_value=20.0 \
+algo.config.clip_param=0.2 \
++checkpoint=logs/DeltaA_Training/20260509_101041-obsopenloop_mtfile_mtnum3002_05071618domainrandinpaper9900pt_nodmwhencollect_20260509004754_pmanm0p1_actionclip20-from_start-g1_29dof_anneal_23dof/model_8400.pt \
+headless=False
+
+
+
+
 
 python humanoidverse/eval_agent.py \
 +checkpoint=logs/MotionTracking/xxxxxxxx_xxxxxxx-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_5800.pt
@@ -184,22 +274,70 @@ __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia HYDRA_FULL_ERROR=1 
 +checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt \
 +simulator=genesis \
 +env.config.save_motion=True \
-+env.config.save_note=mtnum3001_addmotorandobsnoise \
++env.config.save_note=tt_mtnum5_CR7_1th_use_02080215_12300pt \
 +env.config.eval_timestamp=$(date +%Y%m%d_%H%M%S) \
-+num_envs=3001 \
++num_envs=5 \
++headless=False \
++domain_rand=NO_domain_rand \
++device=cuda:0 \
 +rewards.reward_scales.mpjpe=1 \
-+headless=True \
-+domain_rand=domain_rand_for_collect_data \
-+device=cuda:1
++domain_rand.randomize_action_add=False
+
+
+
+
+HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
++checkpoint=logs/MotionTracking/20260507_161819-CR7amass_pretraindomainrandinpaper-motion_tracking-g1_29dof_anneal_23dof/model_9900.pt \
++env.config.save_motion=True \
++env.config.save_note=test_locomotion_mtnum4_2th \
++env.config.eval_timestamp=$(date +%Y%m%d_%H%M%S) \
++num_envs=4 \
++rewards.reward_scales.mpjpe=0 \
++headless=False \
++device=cuda:0 \
++env.config.eval_command="[1.0, 0.0, 0.0]" \
++domain_rand.randomize_action_add=False
+
+
+
+
+
+
+HYDRA_FULL_ERROR=1 \
+python humanoidverse/eval_agent.py \
++checkpoint=logs/DeltaA_Finetune/20260511_082757-right_deltaa_rescale-deltaa_train_with_nodr3002action_m0p1_2th_openloop0510_2111_3800pt-g1_29dof_anneal_23dof/model_2000.pt \
++simulator=genesis \
++num_envs=1 \
++rewards.reward_scales.mpjpe=0 \
++headless=False \
++device=cuda:0 \
++domain_rand.randomize_action_add=False
+
+
+HYDRA_FULL_ERROR=1 \
+python humanoidverse/eval_agent.py \
++checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt \
++num_envs=1 \
++rewards.reward_scales.mpjpe=0 \
++headless=False \
++device=cuda:0 \
++domain_rand.randomize_action_add=False \
++robot.control.stiffness.hip_pitch=100
 
 
 python humanoidverse/eval_agent.py \
-+checkpoint=logs/0506/DF/20260505_200911-tryifcanfinetune_with_openloopobs-deltaamodel_05041436_16900pt_closeloopaddobsnoise-g1_29dof_anneal_23dof/model_100.pt \
-+simulator=genesis \
++checkpoint=logs/TestIsaacGymInstallation/20260510_151441-G123dof_loco_half_gravity-locomotion-g1_29dof_anneal_23dof/model_4400.pt \
 +num_envs=1 \
-+rewards.reward_scales.mpjpe=1 \
++rewards.reward_scales.mpjpe=0 \
 +headless=False \
-+device=cuda:0
++device=cuda:0 \
++domain_rand.randomize_action_add=False \
++env.config.eval_command="[0.1, 0.0, 0.0]"
+
+
+
+\
++opt=eval_analysis_plot_motion_tracking
 
 
 +checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt \
@@ -217,10 +355,10 @@ __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia python logs_collect
 +robot=g1/g1_29dof_anneal_23dof \
 +terrain=terrain_locomotion_plane \
 +obs=motion_tracking/deepmimic_a2c_nolinvel_LARGEnoise_history \
-+visualize_motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/test_mtnum4_addmotorandobsnoise_20260506170604.pkl" \
++visualize_motion_file="humanoidverse/data/motions/g1_29dof_anneal_23dof/TairanTestbed/singles/0-motions_raw_tairantestbed_smpl_video_walk_level2_filter_amass.pkl" \
 +replay_num_envs=1 \
 +recenter_nonzero_to_origin=True \
-+motion_key=motion3 \
++motion_key=0-motions_raw_tairantestbed_smpl_video_walk_level2_filter_amass \
 +rewards.reward_scales.mpjpe=1
 
 
@@ -241,7 +379,7 @@ __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia python logs_collect
 
 HYDRA_FULL_ERROR=1 python humanoidverse/eval_agent.py \
 +device=cuda:0 \
-+checkpoint="logs/MotionTracking/20260505_021818-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_500.pt" \
++checkpoint="logs/DeltaA_Finetune/20260507_092621-tryifcanfinetune_with_openloopobs-deltaamodel_addmotorandobsnoise_05061844_4200pt_closeloopaddmotorandobsnoise-g1_29dof_anneal_23dof/model_1800.pt" \
 +simulator=genesis \
 +rewards.reward_scales.mpjpe=1
 
@@ -315,31 +453,97 @@ HYDRA_FULL_ERROR=1 \
 nohup python humanoidverse/train_agent.py \
 +simulator=isaacgym \
 +exp=train_delta_a_closed_loop \
-algo.config.policy_checkpoint="logs/DeltaA_Training/20260504_143613-obsopenloop-from_start-g1_29dof_anneal_23dof/model_16900.pt" \
+algo.config.policy_checkpoint="logs/DeltaA_Training/20260514_135038-mtnum3002_CR7_3th_add_terbygrav-use_05110827_3002_mtfile-g1_29dof_anneal_23dof/model_3700.pt" \
 +domain_rand=NO_domain_rand_finetune_with_deltaA \
 +rewards=motion_tracking/reward_motion_tracking_dm_simfinetuning \
 +robot=g1/g1_29dof_anneal_23dof \
 +terrain=terrain_locomotion_plane \
 +obs=delta_a/train_policy_with_delta_a \
-num_envs=8192 \
+num_envs=4096 \
 project_name=DeltaA_Finetune \
-experiment_name=tryifcanfinetune_with_openloopobs \
-log_task_name=deltaamodel_05041436_16900pt_closeloopaddobsnoise \
+experiment_name=finetune_3th_CR7_add_terbygrav \
+log_task_name=use_05141350_3700pt_adjust_05110827_9600pt \
 robot.motion.motion_file="humanoidverse/data/motions/g1_29dof_anneal_23dof/TairanTestbed/singles/0-TairanTestbed_TairanTestbed_CR7_video_CR7_level1_filter_amass.pkl" \
 env.config.add_extra_action=True \
-+checkpoint="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt" \
++checkpoint="logs/DeltaA_Finetune/20260511_082757-right_deltaa_rescale-deltaa_train_with_nodr3002action_m0p1_2th_openloop0510_2111_3800pt-g1_29dof_anneal_23dof/model_9600.pt" \
+domain_rand.push_robots=False \
+env.config.noise_to_initial_level=1 \
+rewards.reward_penalty_curriculum=True \
++device=cuda:5 \
+algo.config.save_interval=100 \
+algo.config.num_learning_iterations=100000 \
+> 0514/DeltaA_Finetune_finetune_3th_CR7_add_terbygrav_use_05141350_3700pt_adjust_05110827_9600pt.log 2>&1 &
+
+
++checkpoint="logs/DeltaA_Finetune/20260509_170513-right_deltaa_rescale-deltaa_train_with_nodr3002action_m0p1-g1_29dof_anneal_23dof/model_6400.pt" \
+
+
+
+
+
+python humanoidverse/train_agent.py \
++simulator=isaacgym \
++exp=train_delta_a_closed_loop \
+algo.config.policy_checkpoint="logs/DeltaA_Training/20260513_223338-mtnum3002_CR7_3th_nodmwhencollect_use_05110827_9600pt_20260513220119-from_05110827_3002_mtfile-g1_29dof_anneal_23dof/model_2400.pt" \
++domain_rand=NO_domain_rand_finetune_with_deltaA \
++rewards=motion_tracking/reward_motion_tracking_dm_simfinetuning \
++robot=g1/g1_29dof_anneal_23dof \
++terrain=terrain_locomotion_plane \
++obs=delta_a/train_policy_with_delta_a \
+num_envs=1 \
+project_name=DeltaA_Finetune \
+experiment_name=test \
+log_task_name=test \
+robot.motion.motion_file="humanoidverse/data/motions/g1_29dof_anneal_23dof/TairanTestbed/singles/0-TairanTestbed_TairanTestbed_CR7_video_CR7_level1_filter_amass.pkl" \
+env.config.add_extra_action=True \
++checkpoint="logs/DeltaA_Finetune/20260511_082757-right_deltaa_rescale-deltaa_train_with_nodr3002action_m0p1_2th_openloop0510_2111_3800pt-g1_29dof_anneal_23dof/model_9600.pt" \
 domain_rand.push_robots=False \
 env.config.noise_to_initial_level=1 \
 rewards.reward_penalty_curriculum=True \
 +device=cuda:0 \
 algo.config.save_interval=100 \
 algo.config.num_learning_iterations=100000 \
-> 0505/DeltaA_Finetune_tryifcanfinetune_with_openloopobs_deltaamodel_05041436_16900pt_closeloopaddobsnoise.log 2>&1 &
+env.config.max_episode_length_s=8 \
+headless=False
+
+
+HYDRA_FULL_ERROR=1 \
+nohup python humanoidverse/train_agent.py \
++simulator=isaacgym \
++exp=train_delta_a_closed_loop \
+algo.config.policy_checkpoint="logs/DeltaA_Training/20260507_181623-obsopenloop_mtfile_mtnum3000_addobsnoise_20260426212346-penalty_minimal_action_norm_m0p2-g1_29dof_anneal_23dof/model_5000.pt" \
++domain_rand=NO_domain_rand_finetune_with_deltaA \
++rewards=motion_tracking/reward_motion_tracking_dm_simfinetuning \
++robot=g1/g1_29dof_anneal_23dof \
++terrain=terrain_locomotion_plane \
++obs=delta_a/train_policy_with_delta_a \
+num_envs=4096 \
+project_name=DeltaA_Finetune \
+experiment_name=fanpuguizhen_m0p2 \
+log_task_name=use_05071816_5000pt_adjust_0208_12300pt \
+robot.motion.motion_file="humanoidverse/data/motions/g1_29dof_anneal_23dof/TairanTestbed/singles/0-TairanTestbed_TairanTestbed_CR7_video_CR7_level1_filter_amass.pkl" \
+env.config.add_extra_action=True \
++checkpoint="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt" \
+domain_rand.push_robots=False \
+env.config.noise_to_initial_level=1 \
+rewards.reward_penalty_curriculum=True \
++device=cuda:6 \
+algo.config.save_interval=100 \
+algo.config.num_learning_iterations=100000 \
+headless=True \
+> 0515/DeltaA_Finetune_fanpuguizhen_m0p2_use_05071816_5000pt_adjust_0208_12300pt.log 2>&1 &
+
+
+
+env.config.max_episode_length_s=8 \
+rewards.reward_scales.penalty_action_rate=-0.5 \
+
+
 
 python humanoidverse/train_agent.py \
 +simulator=isaacgym \
 +exp=train_delta_a_closed_loop \
-algo.config.policy_checkpoint="logs/DeltaA_Training/20260504_143613-obsopenloop-from_start-g1_29dof_anneal_23dof/model_3000.pt" \
+algo.config.policy_checkpoint="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt" \
 +domain_rand=NO_domain_rand_finetune_with_deltaA \
 +rewards=motion_tracking/reward_motion_tracking_dm_simfinetuning \
 +robot=g1/g1_29dof_anneal_23dof \
@@ -350,13 +554,45 @@ project_name=DeltaA_Finetune \
 experiment_name=test \
 robot.motion.motion_file="humanoidverse/data/motions/g1_29dof_anneal_23dof/TairanTestbed/singles/0-TairanTestbed_TairanTestbed_CR7_video_CR7_level1_filter_amass.pkl" \
 env.config.add_extra_action=True \
-+checkpoint="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt" \
++checkpoint="logs/DeltaA_Training/20260504_143613-obsopenloop-from_start-g1_29dof_anneal_23dof/model_24000.pt" \
 domain_rand.push_robots=False \
 env.config.noise_to_initial_level=1 \
 rewards.reward_penalty_curriculum=True \
 +device=cuda:0 \
 algo.config.save_interval=100 \
 algo.config.num_learning_iterations=3000 \
+headless=False
+
+
+
+
+
+python humanoidverse/train_agent.py \
++simulator=isaacgym \
++exp=train_delta_a_open_loop \
+algo.config.policy_checkpoint="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt" \
++domain_rand=NO_domain_rand \
++rewards=motion_tracking/delta_a/reward_delta_a_openloop \
+rewards.reward_scales.penalty_minimal_action_norm=-0.1 \
++robot=g1/g1_29dof_anneal_23dof \
++terrain=terrain_locomotion_plane \
++obs=delta_a/open_loop \
+num_envs=1 \
+project_name=DeltaA_Finetune \
+experiment_name=test \
+log_task_name=test \
+robot.motion.motion_file="humanoidverse/data/motions/g1_29dof_anneal_23dof/TairanTestbed/singles/0-TairanTestbed_TairanTestbed_CR7_video_CR7_level1_filter_amass.pkl" \
+env.config.add_extra_action=True \
++checkpoint="logs/DeltaA_Training/20260504_143613-obsopenloop-from_start-g1_29dof_anneal_23dof/model_24000.pt" \
++device=cuda:0 \
+algo.config.save_interval=100 \
+algo.config.num_learning_iterations=3000 \
+env.config.max_episode_length_s=1 \
+env.config.resample_motion_when_training=True \
+env.config.resample_time_interval_s=10000 \
++rewards.reward_scales.mpjpe=0 \
+robot.control.action_clip_value=20.0 \
+algo.config.clip_param=0.2 \
 headless=False
 
 algo.config.policy_checkpoint="logs/DeltaA_Training/20260504_143613-obsopenloop-from_start-g1_29dof_anneal_23dof/model_24000.pt" \
@@ -374,15 +610,15 @@ HYDRA_FULL_ERROR=1 \
 nohup python humanoidverse/train_agent.py \
 +simulator=isaacgym \
 +exp=motion_tracking \
-+domain_rand=NO_domain_rand \
++domain_rand=domain_rand_for_pretrain_in_paper \
 +rewards=motion_tracking/reward_motion_tracking_dm_2real \
 +robot=g1/g1_29dof_anneal_23dof \
 +terrain=terrain_locomotion_plane \
 +obs=motion_tracking/deepmimic_a2c_nolinvel_LARGEnoise_history \
 num_envs=4096 \
 project_name=MotionTracking \
-experiment_name=MotionTracking_CR7 \
-robot.motion.motion_file="logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/motions/mtnum1_no_addobsnoise_20260505015851.pkl" \
+experiment_name=walk_level2_kphippitch400_pretraindomainrandinpaper_from_start \
+robot.motion.motion_file="humanoidverse/data/motions/g1_29dof_anneal_23dof/TairanTestbed/singles/0-motions_raw_tairantestbed_smpl_video_walk_level2_filter_amass.pkl" \
 rewards.reward_penalty_curriculum=True \
 rewards.reward_penalty_degree=0.00001 \
 env.config.resample_motion_when_training=False \
@@ -391,6 +627,82 @@ env.config.termination_curriculum.terminate_when_motion_far_curriculum=True \
 env.config.termination_curriculum.terminate_when_motion_far_threshold_min=0.3 \
 env.config.termination_curriculum.terminate_when_motion_far_curriculum_degree=0.000025 \
 robot.asset.self_collisions=0 \
++device=cuda:7 \
+robot.control.stiffness.hip_pitch=400 \
+> 0514/MotionTracking_walk_level2_kphippitch400_pretraindomainrandinpaper_from_start.log 2>&1 &
+
+
+
++checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt \
+
+
+
+HYDRA_FULL_ERROR=1 \
+nohup python humanoidverse/train_agent.py +simulator=isaacgym +exp=train_delta_a_closed_loop algo.config.policy_checkpoint=logs/DeltaA_Training/20260507_181623-obsopenloop_mtfile_mtnum3000_addobsnoise_20260426212346-penalty_minimal_action_norm_m0p2-g1_29dof_anneal_23dof/model_4200.pt +domain_rand=NO_domain_rand_finetune_with_deltaA +rewards=motion_tracking/reward_motion_tracking_dm_simfinetuning +robot=g1/g1_29dof_anneal_23dof +terrain=terrain_locomotion_plane +obs=delta_a/train_policy_with_delta_a num_envs=4096 project_name=DeltaA_Finetune experiment_name=right_deltaa_rescale log_task_name=deltaa_train_with_nodr3000action_m0p2 robot.motion.motion_file=humanoidverse/data/motions/g1_29dof_anneal_23dof/TairanTestbed/singles/0-TairanTestbed_TairanTestbed_CR7_video_CR7_level1_filter_amass.pkl env.config.add_extra_action=True +checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt domain_rand.push_robots=False env.config.noise_to_initial_level=1 rewards.reward_penalty_curriculum=True +device=cuda:1 algo.config.save_interval=100 algo.config.num_learning_iterations=100000 \
+> 0509/rightDR_finetune/DeltaA_Finetune_right_deltaa_rescale_deltaa_train_with_nodr3000action_m0p2.log 2>&1 &
+
+
+HYDRA_FULL_ERROR=1 \
+nohup python humanoidverse/train_agent.py +simulator=isaacgym +exp=train_delta_a_closed_loop algo.config.policy_checkpoint=logs/DeltaA_Training/20260508_225706-obsopenloop_mtfile_mtnum3000_addobsnoise_20260426212346_pmanm0p1_actionclip20-after_0504_1436_1000pt-g1_29dof_anneal_23dof/model_4500.pt +domain_rand=NO_domain_rand_finetune_with_deltaA +rewards=motion_tracking/reward_motion_tracking_dm_simfinetuning +robot=g1/g1_29dof_anneal_23dof +terrain=terrain_locomotion_plane +obs=delta_a/train_policy_with_delta_a num_envs=4096 project_name=DeltaA_Finetune experiment_name=right_deltaa_rescale log_task_name=deltaa_train_with_nodr3000action_m0p1 robot.motion.motion_file=humanoidverse/data/motions/g1_29dof_anneal_23dof/TairanTestbed/singles/0-TairanTestbed_TairanTestbed_CR7_video_CR7_level1_filter_amass.pkl env.config.add_extra_action=True +checkpoint=logs/MotionTracking/20260208_021503-MotionTracking_CR7-motion_tracking-g1_29dof_anneal_23dof/model_12300.pt domain_rand.push_robots=False env.config.noise_to_initial_level=1 rewards.reward_penalty_curriculum=True +device=cuda:5 algo.config.save_interval=100 algo.config.num_learning_iterations=100000 \
+> 0509/rightDR_finetune/DeltaA_Finetune_right_deltaa_rescale_deltaa_train_with_nodr3000action_m0p1.log 2>&1 &
+
+HYDRA_FULL_ERROR=1 \
+nohup python humanoidverse/train_agent.py +simulator=isaacgym +exp=motion_tracking +domain_rand=domain_rand_for_pretrain_in_paper +rewards=motion_tracking/reward_motion_tracking_dm_2real +robot=g1/g1_29dof_anneal_23dof +terrain=terrain_locomotion_plane +obs=motion_tracking/deepmimic_a2c_nolinvel_LARGEnoise_history num_envs=4096 project_name=MotionTracking experiment_name=single_foot_balance_level1_actual_halfgravity_pretraindomainrandinpaper_from_start robot.motion.motion_file=humanoidverse/data/motions/g1_29dof_anneal_23dof/TairanTestbed/singles/0-motions_raw_tairantestbed_smpl_video_single_foot_balance_level1_filter_amass.pkl rewards.reward_penalty_curriculum=True rewards.reward_penalty_degree=0.00001 env.config.resample_motion_when_training=False env.config.termination.terminate_when_motion_far=True env.config.termination_curriculum.terminate_when_motion_far_curriculum=True env.config.termination_curriculum.terminate_when_motion_far_threshold_min=0.3 env.config.termination_curriculum.terminate_when_motion_far_curriculum_degree=0.000025 robot.asset.self_collisions=0 +device=cuda:1 \
+> 0513/MotionTracking_single_foot_balance_level1_actual_halfgravity_pretraindomainrandinpaper_from_start.log 2>&1 &
+
+HYDRA_FULL_ERROR=1 \
+nohup python humanoidverse/train_agent.py \
++simulator=isaacgym \
++exp=locomotion \
++domain_rand=domain_rand_for_pretrain_in_paper \
++rewards=loco/reward_g1_locomotion \
++robot=g1/g1_29dof_anneal_23dof \
++terrain=terrain_locomotion_plane \
++obs=loco/leggedloco_obs_history_wolinvel \
+num_envs=4096 \
+project_name=Locomotion \
+experiment_name=std_from_start \
++device=cuda:3 \
+> 0510/Locomotion_std_from_start.log 2>&1 &
+
+
+HYDRA_FULL_ERROR=1 \
+nohup python humanoidverse/train_agent.py \
++simulator=isaacgym \
++exp=locomotion \
++domain_rand=NO_domain_rand \
++rewards=loco/reward_g1_locomotion \
++robot=g1/g1_29dof_anneal_23dof \
++terrain=terrain_locomotion_plane \
++obs=loco/leggedloco_obs_singlestep_withlinvel \
+num_envs=4096 \
+project_name=TestIsaacGymInstallation \
+experiment_name=G123dof_loco_half_gravity \
+headless=True \
+rewards.reward_penalty_curriculum=True \
+rewards.reward_initial_penalty_scale=0.1 \
+rewards.reward_penalty_degree=0.00003 \
 +device=cuda:4 \
-+simulator=genesis \
-> 0505/MotionTracking_MotionTracking_CR7_mtnum1_no_addobsnoise_genesis.log 2>&1 &
+> 0510/Locomotion_std_from_start_half_gravity.log 2>&1 &
+
+
+HYDRA_FULL_ERROR=1 python humanoidverse/train_agent.py \
++simulator=isaacgym \
++exp=locomotion \
++domain_rand=NO_domain_rand \
++rewards=loco/reward_g1_locomotion \
++robot=g1/g1_29dof_anneal_23dof \
++terrain=terrain_locomotion_plane \
++obs=loco/leggedloco_obs_singlestep_withlinvel \
+num_envs=4096 \
+project_name=TestIsaacGymInstallation \
+experiment_name=G123dof_loco \
+headless=True \
+rewards.reward_penalty_curriculum=True \
+rewards.reward_initial_penalty_scale=0.1 \
+rewards.reward_penalty_degree=0.00003 
+
+
+
+
+[[1. 0.]]

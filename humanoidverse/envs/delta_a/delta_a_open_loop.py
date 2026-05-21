@@ -43,6 +43,111 @@ class DeltaA_OpenLoop(LeggedRobotMotionTracking):
         # 记录 delta-a 占原始动作的百分比，评估网络是不是在“用力过猛”
         self.detla_action_percentage_heatmaps = torch.zeros((self.simulator.num_envs, self.num_dofs)).to(device)
         self.delta_action_cnt = 1 # 统计步数计数器，用于计算移动平均
+        print(f"delta-a 动作的绝对值{self.delta_action_dof_heatmaps}")
+        print(f"delta-a 动作占原始动作的百分比{self.detla_action_percentage_heatmaps}")
+    # def _compute_torques(self, actions):
+    #     """ 
+    #     【函数作用】：将网络输出的 action 转化为底层 PD 控制器需要的力矩 (Torques)。
+    #     【ASAP 论文背景】：这是 Delta-A 策略的灵魂所在！在这个函数里，网络的输出 `actions` 变成了 $\Delta a$。
+    #     最终发给 PD 控制器的目标位置是： 原始动画预设动作 (motion_action) + 网络微调动作 (actions_scaled)！
+        
+    #     Compute torques from actions.
+    #         Actions can be interpreted as position or velocity targets given to a PD controller, or directly as scaled torques.
+    #         [NOTE]: torques must have the same dimension as the number of DOFs, even if some DOFs are not actuated.
+    #     Args:
+    #         actions (torch.Tensor): Actions (网络输出的原始无量纲的预测值)
+
+    #     Returns:
+    #         [torch.Tensor]: Torques sent to the simulation (发送给物理引擎的关节力矩)
+    #     【被谁调用】：物理引擎每推演一步之前，被基类的 `step()` 函数底层调用以获取控制信号。
+    #     """
+        
+    #     # 如果配置文件里要求强制把 delta-a 设为 0 (纯开环测试，不带网络微调)
+    #     if hasattr(self.config, 'zero_delta_a'):
+    #         if self.config.zero_delta_a:                
+    #             actions *= 0. # 乘以 0 抹除网络的输出
+    #             print("actions", actions)
+    #             pass
+                
+    #     # 将网络输出的无量纲数值（通常在 -1 到 1 之间）乘上比例因子，转化为物理世界的弧度微调值
+    #     actions_scaled = actions * self.config.robot.control.action_scale
+    #     control_type = self.config.robot.control.control_type # 获取控制类型（通常是 P: 位置控制）
+        
+    #     # 如果配置允许叠加基础动作 (也就是标准的 Delta-A 模式)
+    #     if self.config['add_extra_action']:
+    #         # 去动作库里查出当前这一帧，原本该下发什么动作 (Open Loop Action)
+    #         motion_action = self.get_open_loop_action_at_current_timestep()
+    #         # motion_action *= 0
+    #         # print("motion_action", motion_action)
+    #         # print("self.get_open_loop_action_at_current_timestep()", self.get_open_loop_action_at_current_timestep())
+    #         # 把基础动作也乘上比例因子，转为物理弧度
+    #         motion_action *= self.config.robot.control.action_scale
+    #     else:
+    #         # 如果不叠加，那就退化成了普通的强化学习，让网络从零学起全权接管
+    #         print("zeroing out motion_action") 
+    #         motion_action = torch.zeros_like(actions_scaled)
+
+    #     # 脚踝专属实验控制逻辑 (Ankle Pitch/Roll 隔离测试)
+    #     if hasattr(self.config, 'anklePR'):
+    #         if self.config.anklePR:
+    #             # 除了 4, 5, 10, 11 (这四个通常是双腿踝关节的俯仰和侧倾电机)，其余部位的网络微调全部强行归零。
+    #             # 意思是：上半身和腿只听话照做，只有脚踝允许通过网络动态微调来维持平衡。
+    #             actions_scaled[:, [i for i in range(actions_scaled.shape[1]) if i not in [4,5,10,11]]] *= 0
+                
+    #             # print("zeroing out non-anklePR actions")
+
+        
+    #     # add action_to_delta_a_heatmap
+    #     # 在线计算移动平均，更新 delta-a 热力图，方便分析网络对哪个关节微调得最狠
+    #     self.delta_action_dof_heatmaps = self.delta_action_dof_heatmaps * self.delta_action_cnt / (1+self.delta_action_cnt) + 1/(1+self.delta_action_cnt) * torch.abs(actions_scaled)
+    #     self.detla_action_percentage_heatmaps = self.detla_action_percentage_heatmaps * self.delta_action_cnt / (1+self.delta_action_cnt) + 1/(1+self.delta_action_cnt) * torch.abs(actions_scaled / motion_action)
+    #     self.delta_action_cnt += 1
+
+
+    #     # print("self.delta_action_dof_heatmaps", self.delta_action_dof_heatmaps)
+    #     # print("self.detla_action_percentage_heatmaps", self.detla_action_percentage_heatmaps)
+    #     # import ipdb; ipdb.set_trace()
+    #     # print("motion_action", motion_action)
+    #     # print("motion_action", motion_action)
+    #     # print("motion_action", motion_action.shape)
+    #     # print('actions', actions)
+    #     # print('motion_action', motion_action)
+    #     # import ipdb; ipdb.set_trace(
+
+    #     # handcrafted perfect delta_a for 65Kp (硬编码的测试代码注释)
+    #     # perfect_delta_a_for_65Kp = (motion_action + self.default_dof_pos - self.simulator.dof_pos) * -0.35
+    #     # actions_scaled = perfect_delta_a_for_65Kp
+
+    #     # =====================================================================
+    #     # 核心公式实现： PD 控制器的目标位置
+    #     # =====================================================================
+    #     if control_type=="P":
+    #         # 基础 RL (被注释): torques = Kp * (网络动作 + 默认静止姿态 - 实际当前姿态) - Kd * 实际速度
+    #         # torques = self._kp_scale * self.p_gains*(actions_scaled + self.default_dof_pos - self.simulator.dof_pos) - self._kd_scale * self.d_gains*self.simulator.dof_vel
+            
+    #         # ★ Delta-A 公式: torques = Kp * (微调动作(Δa) + 开环预设动作(a_ref) + 默认静止姿态 - 实际当前姿态) - Kd * 实际速度
+    #         torques = self._kp_scale * self.p_gains*(actions_scaled + motion_action + self.default_dof_pos - self.simulator.dof_pos) - self._kd_scale * self.d_gains*self.simulator.dof_vel
+    #     elif control_type=="V":
+    #         # 纯速度控制
+    #         torques = self._kp_scale * self.p_gains*(actions_scaled - self.simulator.dof_vel) - self._kd_scale * self.d_gains*(self.simulator.dof_vel - self.last_dof_vel)/self.sim_dt
+    #     elif control_type=="T":
+    #         # 纯力矩控制
+    #         torques = actions_scaled
+    #     else:
+    #         raise NameError(f"Unknown controller type: {control_type}")
+        
+    #     # 领域随机化 (Domain Randomization)：给算出来的力矩加一点高斯噪声，防止网络过拟合到纯净的物理引擎里
+    #     if self.config.domain_rand.randomize_torque_rfi:
+    #         torques = torques + (torch.rand_like(torques)*2.-1.) * self.config.domain_rand.rfi_lim * self._rfi_lim_scale * self.torque_limits
+        
+    #     # 为了保护电机，截断过高的力矩指令
+    #     if self.config.robot.control.clip_torques:
+    #         return torch.clip(torques, -self.torque_limits, self.torque_limits)
+        
+    #     else:
+    #         return torques
+
+
 
     def _compute_torques(self, actions):
         """ 
@@ -102,6 +207,9 @@ class DeltaA_OpenLoop(LeggedRobotMotionTracking):
         self.detla_action_percentage_heatmaps = self.detla_action_percentage_heatmaps * self.delta_action_cnt / (1+self.delta_action_cnt) + 1/(1+self.delta_action_cnt) * torch.abs(actions_scaled / motion_action)
         self.delta_action_cnt += 1
 
+        # print(f"delta-a 动作的绝对值{self.delta_action_dof_heatmaps}")
+        # print(f"delta-a 动作占原始动作的百分比{self.detla_action_percentage_heatmaps}")
+
 
         # print("self.delta_action_dof_heatmaps", self.delta_action_dof_heatmaps)
         # print("self.detla_action_percentage_heatmaps", self.detla_action_percentage_heatmaps)
@@ -145,6 +253,8 @@ class DeltaA_OpenLoop(LeggedRobotMotionTracking):
         
         else:
             return torques
+
+
         
     # 以下三个函数是用来计算“正则化惩罚项”的。
     # 【ASAP 论文背景】：既然让网络输出残差(Delta-A)，我们就希望这个微调越小越好！

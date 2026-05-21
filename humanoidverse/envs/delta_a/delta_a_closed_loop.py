@@ -45,6 +45,16 @@ class DeltaA_ClosedLoop(LeggedRobotMotionTracking):
         # 初始化闭环动作的缓存张量，维度为 [环境数量, 动作维度]，不计算梯度
         # 这个通常用于存储名义上预训练好的策略动作（Base Policy Action）
         self.closed_loop_actions = torch.zeros(self.num_envs, self.dim_actions, device=self.device, requires_grad=False)
+        
+        
+        # 初始化两个张量，用于记录和统计网络输出的 delta-a 动作的绝对值（生成热力图分析）
+        self.delta_action_dof_heatmaps = torch.zeros((self.simulator.num_envs, self.num_dofs)).to(device)
+        # 记录 delta-a 占原始动作的百分比，评估网络是不是在“用力过猛”
+        self.detla_action_percentage_heatmaps = torch.zeros((self.simulator.num_envs, self.num_dofs)).to(device)
+        self.delta_action_cnt = 1 # 统计步数计数器，用于计算移动平均
+        # print(f"delta-a 动作的绝对值{self.delta_action_dof_heatmaps}")
+        # print(f"delta-a 动作占原始动作的百分比{self.detla_action_percentage_heatmaps}")
+
 
     def _init_buffers(self):
         # 【函数说明：初始化数据缓存区】
@@ -204,6 +214,17 @@ class DeltaA_ClosedLoop(LeggedRobotMotionTracking):
                 # 将 4, 5, 10, 11 以外的其他 19 个自由度的附加补偿动作 (Delta) 强制置 0
                 motion_action[:, [i for i in range(actions_scaled.shape[1]) if i not in [4,5,10,11]]] *= 0
                 print("zeroing out non-anklePR actions") # 打印日志告知：仅保留脚踝补偿
+
+
+
+        # add action_to_delta_a_heatmap
+        # 在线计算移动平均，更新 delta-a 热力图，方便分析网络对哪个关节微调得最狠
+        self.delta_action_dof_heatmaps = self.delta_action_dof_heatmaps * self.delta_action_cnt / (1+self.delta_action_cnt) + 1/(1+self.delta_action_cnt) * torch.abs(motion_action)
+        self.detla_action_percentage_heatmaps = self.detla_action_percentage_heatmaps * self.delta_action_cnt / (1+self.delta_action_cnt) + 1/(1+self.delta_action_cnt) * torch.abs(motion_action / actions_scaled)
+        self.delta_action_cnt += 1
+
+        # print(f"delta-a 动作的绝对值{self.delta_action_dof_heatmaps}")
+        # print(f"delta-a 动作占原始动作的百分比{self.detla_action_percentage_heatmaps}")
 
 
 
